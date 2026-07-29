@@ -52,21 +52,20 @@ ATTACH_BUTTON_SELECTOR = (
     "div[title='Attach'], button[aria-label='Attach']"
 )
 # The attach button opens a menu (Document / Photos & Videos / Camera / ...).
-# Clicking straight through to a generic input[type=file][accept*=image]
-# without first picking this specific menu item risks grabbing the WRONG
-# hidden file input if the page has more than one that accepts images (e.g.
-# a sticker-maker flow) - which is what caused images to send as stickers
-# with no caption field at all.
+# We never click the "Photos & videos" row itself - WhatsApp's own click
+# handler on that row calls the hidden <input type=file>'s native .click(),
+# which pops a REAL OS file-picker dialog. Selenium cannot interact with
+# native OS dialogs at all (they're outside the browser process), so that
+# click is what caused everything to freeze with a folder browser open.
 #
-# Target the exact text node directly rather than searching ancestors for
-# "contains a descendant with this text" - that broader search matched the
-# whole menu container (since the container also "contains" this text
-# somewhere in its subtree), so .click() landed on whatever menu item
-# happened to sit at the container's bounding-box center instead of this
-# one. Clicking the text span itself is precise, and the click still
-# bubbles up to the row's real handler like any normal DOM click.
-PHOTOS_VIDEOS_MENU_ITEM_XPATH = "//span[normalize-space()='Photos & videos']"
-IMAGE_FILE_INPUT_SELECTOR = "input[type='file'][accept*='image']"
+# Instead, once the menu is open, we locate the correct hidden file input
+# directly and hand it the path via Selenium's file-upload mechanism, which
+# sets the file programmatically with no dialog involved. "Photos & Videos"
+# and "New sticker" both have accept*="image", so that alone doesn't tell
+# them apart - but only the Photos & Videos input also accepts video mime
+# types (since it takes photos *and* videos), so filtering on accept*="video"
+# reliably picks the right one.
+IMAGE_FILE_INPUT_SELECTOR = "input[type='file'][accept*='video']"
 # Deliberately narrow - a broader fallback like //div[@contenteditable='true']
 # risks matching some unrelated editable element elsewhere on the page (e.g.
 # the search box), which then silently absorbs the caption + Enter while the
@@ -170,16 +169,10 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     attach_btn.click()
     time.sleep(0.5)
 
-    # Must click "Photos & Videos" specifically - jumping straight to any
-    # input[type=file][accept*=image] on the page risks grabbing a different
-    # hidden input tied to another flow (e.g. sticker creation), which is
-    # what caused images to send as stickers with no caption field.
-    photos_menu_item = wait.until(
-        EC.element_to_be_clickable((By.XPATH, PHOTOS_VIDEOS_MENU_ITEM_XPATH))
-    )
-    photos_menu_item.click()
-    time.sleep(0.5)
-
+    # Deliberately no click on "Photos & Videos" here - see the comment on
+    # IMAGE_FILE_INPUT_SELECTOR above. Opening the attach menu is enough to
+    # make the hidden input exist in the DOM; send_keys sets the file
+    # directly without ever triggering the input's native click/dialog.
     file_input = wait.until(
         EC.presence_of_element_located((By.CSS_SELECTOR, IMAGE_FILE_INPUT_SELECTOR))
     )
