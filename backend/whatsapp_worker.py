@@ -52,7 +52,12 @@ ATTACH_BUTTON_SELECTOR = (
     "div[title='Attach'], button[aria-label='Attach']"
 )
 IMAGE_FILE_INPUT_SELECTOR = "input[type='file'][accept*='image']"
-CAPTION_XPATH = "//div[@aria-label='Add a caption'] | //div[@contenteditable='true'][@data-tab]"
+# Deliberately narrow - a broader fallback like //div[@contenteditable='true']
+# risks matching some unrelated editable element elsewhere on the page (e.g.
+# the search box), which then silently absorbs the caption + Enter while the
+# actual image-preview dialog just sits there looking "stuck".
+CAPTION_XPATH = "//div[@aria-label='Add a caption']"
+SEND_BUTTON_SELECTOR = "span[data-icon='send'], span[data-icon='wds-ic-send-filled'], button[aria-label='Send']"
 
 
 # ---- Remote queue client (talks to api/index.py on Vercel) ----
@@ -160,7 +165,14 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     caption_box.click()
     caption_box.send_keys(caption)
     time.sleep(0.5)
-    caption_box.send_keys(Keys.ENTER)
+
+    # Click the actual Send button rather than pressing Enter - the caption
+    # box is a contenteditable div, and Enter doesn't reliably submit it
+    # across all WhatsApp Web UI versions (sometimes it just inserts a
+    # newline instead), which is what caused sends to hang on the preview
+    # screen indefinitely.
+    send_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, SEND_BUTTON_SELECTOR)))
+    send_btn.click()
     time.sleep(3)  # image uploads can take longer than a plain text send
 
 

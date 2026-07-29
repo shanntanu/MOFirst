@@ -19,7 +19,8 @@
       "Bash(python -c \"import json; json.load\\(open\\('vercel.json'\\)\\); print\\('valid json'\\)\")",
       "Bash(mkdir -p public)",
       "Bash(cp -r frontend/* public/)",
-      "WebFetch(domain:mo-first-oh41vi0c9-testertest.vercel.app)"
+      "WebFetch(domain:mo-first-oh41vi0c9-testertest.vercel.app)",
+      "Bash(python -m py_compile backend/whatsapp_worker.py)"
     ]
   }
 }
