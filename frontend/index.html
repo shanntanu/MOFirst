@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Motilal Oswal - Registration</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="phone-shell">
+  <div class="topbar"></div>
+
+  <div class="header">
+    <img src="MO Logo.png" alt="Motilal Oswal">
+  </div>
+
+  <!-- Screen 1: Registration form -->
+  <div class="screen" id="screen-form">
+    <div class="title">Registration Form</div>
+    <div class="subtitle">Share your details to begin the registration process</div>
+
+    <form id="regForm" novalidate>
+      <div class="field" id="field-name">
+        <label for="fullName">Full Name<span class="req">*</span></label>
+        <input type="text" id="fullName" name="fullName" placeholder="Enter full name" autocomplete="name">
+        <div class="field-error">Please enter your full name</div>
+      </div>
+
+      <div class="field" id="field-contact">
+        <label for="contactNumber">Contact Number<span class="req">*</span></label>
+        <input type="tel" id="contactNumber" name="contactNumber" placeholder="Enter contact number" autocomplete="tel" inputmode="numeric" maxlength="10">
+        <div class="field-error">Please enter a valid 10-digit contact number</div>
+      </div>
+
+      <div class="field" id="field-whatsapp">
+        <label for="whatsappNumber">Whatsapp Number</label>
+        <input type="tel" id="whatsappNumber" name="whatsappNumber" placeholder="Enter whatsapp number (if different)" autocomplete="tel" inputmode="numeric" maxlength="10">
+        <div class="field-error">Please enter a valid 10-digit whatsapp number</div>
+      </div>
+
+      <div class="field" id="field-email">
+        <label for="emailId">Email Id</label>
+        <input type="email" id="emailId" name="emailId" placeholder="Enter email id" autocomplete="email">
+        <div class="field-error">Please enter a valid email id</div>
+      </div>
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="agreeConnect" name="agreeConnect">
+        <label for="agreeConnect">I agree for Motilal Oswal team to connect with me</label>
+      </div>
+
+      <button type="submit" class="btn-proceed" id="proceedBtn" disabled>
+        <span id="proceedLabel">Proceed</span>
+        <span>&#8250;</span>
+      </button>
+
+      <div class="form-status" id="formStatus"></div>
+    </form>
+  </div>
+
+  <!-- Screen 2: Thank you -->
+  <div class="screen hidden" id="screen-thankyou">
+    <div class="thankyou-title">Thank You!</div>
+    <div class="thankyou-sub">Your response has been submitted.</div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#2b2a7a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+        </div>
+        <div>
+          <div class="card-title">Attend Webinar</div>
+          <div class="card-desc">Join our upcoming online session</div>
+        </div>
+      </div>
+      <div class="card-body">Webinar details will be sent to your email id shortly</div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="#2b2a7a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><line x1="20" y1="8" x2="20" y2="14"></line><line x1="17" y1="11" x2="23" y2="11"></line></svg>
+        </div>
+        <div>
+          <div class="card-title">Open an Account</div>
+          <div class="card-desc">Start your journey with us today</div>
+        </div>
+      </div>
+      <div class="card-body">Create your account in just a few simple steps. Get access to all features and benefits.</div>
+      <a class="btn-outline" href="https://ekyc.motilaloswal.com/open-demat-account" target="_blank" rel="noopener">
+        Open Account
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2b2a7a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+      </a>
+    </div>
+  </div>
+
+  <div class="home-indicator"></div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>

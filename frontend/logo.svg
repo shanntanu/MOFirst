@@ -1,0 +1,20 @@
+<svg viewBox="0 0 400 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Motilal Oswal - think wealth creation">
+  <defs>
+    <style>
+      .brand-navy { fill: #2b2a7a; }
+      .brand-gold { fill: #f5a623; }
+    </style>
+  </defs>
+  <!-- gold arc -->
+  <path d="M 78 20
+           A 45 45 0 1 0 78 108"
+        fill="none" stroke="#f5a623" stroke-width="7" stroke-linecap="round"/>
+  <!-- arrow tip on arc -->
+  <path d="M 70 16 L 84 14 L 80 27 Z" class="brand-gold"/>
+
+  <text x="60" y="60" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-weight="700" font-size="42" class="brand-navy">motilal</text>
+  <text x="90" y="100" font-family="Georgia, 'Times New Roman', serif" font-style="italic" font-weight="700" font-size="42" class="brand-navy">oswal</text>
+
+  <text x="95" y="122" font-family="Georgia, 'Times New Roman', serif" font-size="15" class="brand-navy">think wealth creation</text>
+  <path d="M 300 108 L 308 118 L 292 118 Z" class="brand-gold"/>
+</svg>

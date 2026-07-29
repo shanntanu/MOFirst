@@ -1,0 +1,233 @@
+:root {
+  --mo-navy: #2b2a7a;
+  --mo-gold: #f5a623;
+  --mo-red: #e0455a;
+  --mo-border: #d9d9df;
+  --mo-placeholder: #9a9aa5;
+  --mo-text: #1c1c28;
+  --mo-bg: #ffffff;
+  --mo-disabled-bg: #ececef;
+  --mo-disabled-text: #b3b3bb;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #f2f2f5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--mo-text);
+}
+
+.phone-shell {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--mo-bg);
+  box-shadow: 0 0 24px rgba(0,0,0,0.06);
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  height: 4px;
+  background: #1c1c28;
+}
+
+.header {
+  display: flex;
+  justify-content: center;
+  padding: 28px 20px 16px;
+  border-bottom: 1px solid #eee;
+}
+
+.header img { height: 70px; }
+
+.screen { padding: 28px 24px 40px; }
+
+.title {
+  text-align: center;
+  color: var(--mo-navy);
+  font-size: 30px;
+  font-weight: 700;
+  margin: 4px 0 10px;
+}
+
+.subtitle {
+  text-align: center;
+  color: #6b6b76;
+  font-size: 16px;
+  line-height: 1.4;
+  margin: 0 0 28px;
+  padding: 0 8px;
+}
+
+.field { margin-bottom: 22px; }
+
+.field label {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--mo-text);
+}
+
+.field label .req {
+  color: var(--mo-red);
+  margin-left: 2px;
+}
+
+.field input[type="text"],
+.field input[type="tel"],
+.field input[type="email"] {
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--mo-border);
+  border-radius: 8px;
+  font-size: 15px;
+  color: var(--mo-text);
+  background: #fff;
+  outline: none;
+}
+
+.field input::placeholder { color: var(--mo-placeholder); }
+
+.field input:focus {
+  border-color: var(--mo-navy);
+}
+
+.field-error {
+  color: var(--mo-red);
+  font-size: 13px;
+  margin-top: 6px;
+  display: none;
+}
+
+.field.has-error input { border-color: var(--mo-red); }
+.field.has-error .field-error { display: block; }
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 26px 0 30px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: var(--mo-navy);
+  flex-shrink: 0;
+}
+
+.checkbox-row label {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.btn-proceed {
+  width: 100%;
+  padding: 16px;
+  border-radius: 8px;
+  border: none;
+  font-size: 16px;
+  font-weight: 600;
+  background: var(--mo-disabled-bg);
+  color: var(--mo-disabled-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.15s, color 0.15s;
+  cursor: not-allowed;
+}
+
+.btn-proceed.enabled {
+  background: var(--mo-navy);
+  color: #fff;
+  cursor: pointer;
+}
+
+.btn-proceed:disabled { pointer-events: none; }
+
+.form-status {
+  text-align: center;
+  font-size: 14px;
+  margin-top: 14px;
+  min-height: 18px;
+}
+
+.form-status.error { color: var(--mo-red); }
+.form-status.success { color: #1e8e5a; }
+
+/* ---- Thank you screen ---- */
+.thankyou-title {
+  text-align: center;
+  color: var(--mo-navy);
+  font-size: 32px;
+  font-weight: 700;
+  margin: 10px 0 8px;
+}
+
+.thankyou-sub {
+  text-align: center;
+  color: #6b6b76;
+  font-size: 16px;
+  margin-bottom: 30px;
+}
+
+.card {
+  border: 1px solid #e2e2ea;
+  border-radius: 14px;
+  padding: 22px;
+  margin-bottom: 20px;
+}
+
+.card-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+
+.card-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: #ecebfc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.card-icon svg { width: 22px; height: 22px; }
+
+.card-title { font-size: 18px; font-weight: 700; color: var(--mo-text); }
+.card-desc { font-size: 14px; color: #8a8a94; margin-top: 2px; }
+
+.card-body { font-size: 15px; color: #55555f; line-height: 1.5; }
+
+.btn-outline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1.5px solid var(--mo-navy);
+  color: var(--mo-navy);
+  background: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hidden { display: none !important; }
+
+.home-indicator {
+  width: 120px;
+  height: 4px;
+  background: #444;
+  border-radius: 2px;
+  margin: 14px auto 10px;
+}
