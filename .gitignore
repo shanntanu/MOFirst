@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+backend/whatsapp_profiles/
+backend/queue.db
