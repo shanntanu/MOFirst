@@ -1,5 +1,8 @@
-// Point this at the backend host when deploying (e.g. http://localhost:5000)
-const API_BASE = window.MO_API_BASE || "http://localhost:5000";
+// Defaults to the same origin the page was loaded from (works for localhost,
+// ngrok, or any real domain, since app.py serves both the frontend and the
+// API). Override window.MO_API_BASE before this script runs only if the
+// frontend is ever hosted separately from the Flask backend.
+const API_BASE = window.MO_API_BASE || window.location.origin;
 
 const PHONE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -86,7 +89,12 @@ function initRegistrationForm() {
     try {
       const res = await fetch(`${API_BASE}/api/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // Skips ngrok's free-tier browser warning interstitial, which
+          // otherwise returns an HTML page instead of JSON for new visitors.
+          "ngrok-skip-browser-warning": "true",
+        },
         body: JSON.stringify(payload),
       });
 

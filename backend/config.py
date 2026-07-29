@@ -4,11 +4,12 @@ from pathlib import Path
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
 _DEFAULTS = {
-    "num_systems": 3,
+    "api_base": "http://localhost:5000",
+    "worker_api_key": "",
     "message_delay_seconds": 5,
-    "message_template": "Hi {full_name}, thank you for registering with Motilal Oswal!",
+    "message_template": "Hi {first_name}, thank you for registering with Motilal Oswal!",
+    "message_image": None,
     "country_code": "91",
-    "db_path": "queue.db",
     "chrome_profile_root": "./whatsapp_profiles",
     "headless": False,
 }

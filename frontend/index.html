@@ -97,6 +97,13 @@
   <div class="home-indicator"></div>
 </div>
 
+<script>
+  // The form and the /api/* functions are both served from the same Vercel
+  // deployment (see vercel.json), so this is normally left unset -
+  // script.js defaults to window.location.origin automatically.
+  // Only set this for local testing against `python api/index.py` directly:
+  // window.MO_API_BASE = "http://localhost:5000";
+</script>
 <script src="script.js"></script>
 </body>
 </html>

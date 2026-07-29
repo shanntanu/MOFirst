@@ -7,106 +7,153 @@ absorbs all traffic.
 ## Structure
 
 ```
-frontend/          Static mobile form + thank-you screen (index.html, style.css, script.js, logo.svg)
-backend/
-  app.py            Flask API: serves the frontend, POST /api/register, GET /api/queue/stats
-  config.py         Loads backend/config.json fresh on every read (so live tuning works)
-  config.json       num_systems, message_delay_seconds, message_template, country_code, etc.
-  db.py             SQLite-backed queue, shared by the API and every worker
-  whatsapp_worker.py One process per WhatsApp number/machine; sends via WhatsApp Web (Selenium)
-  requirements.txt
+frontend/            Static mobile form + thank-you screen
+  index.html, style.css, script.js, logo.svg, message.png (WhatsApp image)
+
+api/                 Deployed to Vercel as serverless functions
+  index.py            Flask app: POST /api/register, GET /api/queue/next,
+                       POST /api/queue/<id>/sent, POST /api/queue/<id>/failed,
+                       GET /api/queue/stats
+  config.py           Reads NUM_SYSTEMS / WORKER_API_KEY / DATABASE_URL from env
+  db.py               Postgres-backed queue (hosted DB - Neon/Supabase, etc.)
+
+vercel.json           Routes /api/* to api/index.py, everything else to frontend/
+requirements.txt      Python deps for the Vercel function (flask, psycopg2-binary)
+
+backend/               Runs locally on your always-on machine - NOT deployed
+  whatsapp_worker.py    One process per WhatsApp number; polls the Vercel API
+                        over HTTPS and sends via WhatsApp Web (Selenium)
+  config.py, config.json  Local-only worker settings (message text, delay,
+                        image, which Vercel URL to poll)
+  requirements.txt      selenium, requests
 ```
 
 ## How the pieces fit together
 
-1. A visitor scans a QR/opens the link and fills the form (`frontend/index.html`).
-2. On submit, `script.js` POSTs to `/api/register`. The backend validates the
-   fields and inserts a row into the `leads` table in `backend/queue.db`.
-3. Each lead is deterministically assigned to one of `num_systems` partitions
-   (hash of the WhatsApp/contact number `% num_systems`), so a given phone
-   number always routes to the same machine even across restarts.
-4. Each `whatsapp_worker.py` process only picks up leads assigned to its own
-   `SYSTEM_ID`, opens `wa.me`-style deep links in WhatsApp Web, and sends the
-   templated message - waiting `message_delay_seconds` between sends.
-5. On success the thank-you screen (image 2) shows, with the "Open an
-   Account" button linking to `https://ekyc.motilaloswal.com/open-demat-account`.
+1. A visitor scans a QR/opens the link and fills the form, served from your
+   Vercel deployment (`frontend/index.html`).
+2. On submit, `script.js` POSTs to `/api/register` - same Vercel domain, so
+   no CORS is involved. `api/index.py` validates the fields and inserts a row
+   into the `leads` table in your hosted Postgres database.
+3. Each lead is deterministically assigned to one of `NUM_SYSTEMS` partitions
+   (hash of the WhatsApp/contact number `% NUM_SYSTEMS`), so a given phone
+   number always routes to the same worker even across restarts.
+4. On the machine you keep WhatsApp Web logged into, `whatsapp_worker.py`
+   polls `GET /api/queue/next?system_id=<SYSTEM_ID>` every couple of seconds
+   over plain outbound HTTPS - no inbound port, no tunnel needed. When it
+   gets a lead, it sends the message (+ image) via WhatsApp Web, then reports
+   back `POST /api/queue/<id>/sent` or `.../failed`.
+5. On success the thank-you screen shows, with the "Open an Account" button
+   linking to `https://ekyc.motilaloswal.com/open-demat-account`.
 
-## Setting up 3 systems
+**Why this split:** Vercel functions are stateless and short-lived with no
+persistent disk - fine for quick DB reads/writes, but incompatible with a
+Selenium/Chrome session that must stay logged into WhatsApp Web for weeks.
+So the queue/API lives on Vercel + a hosted Postgres, while the actual
+WhatsApp sending stays on a machine you control, reaching out instead of
+being reached.
 
-`backend/config.json`:
+## One-time setup
+
+### 1. Create a free hosted Postgres database
+
+Use [Neon](https://neon.tech) or [Supabase](https://supabase.com) (both have
+a free tier). Create a project/database and copy its connection string
+(use the **pooled** connection string if offered - e.g. Neon's `-pooler`
+host - since each API request opens a fresh connection).
+
+### 2. Deploy to Vercel
+
+- Push this repo to GitHub and import it in Vercel, or run `vercel deploy`
+  from the project root.
+- In the Vercel project's **Environment Variables**, set:
+  | Variable | Value |
+  |---|---|
+  | `DATABASE_URL` | the connection string from step 1 |
+  | `NUM_SYSTEMS` | how many WhatsApp numbers/workers you're running (e.g. `3`) |
+  | `WORKER_API_KEY` | a random secret string you make up - protects the queue endpoints from random internet traffic |
+- Deploy. You'll get a URL like `https://your-app.vercel.app` - opening it
+  should show the registration form.
+
+### 3. Configure and run the local worker(s)
+
+Edit `backend/config.json`:
 
 ```json
 {
-  "num_systems": 3,
+  "api_base": "https://your-app.vercel.app",
+  "worker_api_key": "the same secret you set in Vercel",
   "message_delay_seconds": 5,
-  "message_template": "Hi {full_name}, thank you for registering with Motilal Oswal! ...",
+  "message_template": "Hi {first_name}, ...",
+  "message_image": "../frontend/message.png",
   "country_code": "91"
 }
 ```
 
-- `num_systems`: how many machines/WhatsApp numbers you're splitting load
-  across. Change this centrally in the shared `config.json` (or the copy on
-  each machine, if `queue.db` isn't shared over a network drive - see below).
+- `api_base` / `worker_api_key` must match your Vercel deployment/env var.
 - `message_delay_seconds`: seconds between two WhatsApp sends **on the same
-  machine**. Three machines running in parallel therefore send roughly 3x
-  as fast in aggregate while each individual number stays throttled.
-- Every worker re-reads `config.json` before each send, so you can tune the
-  delay live without restarting the workers.
+  machine**. Running 3 workers in parallel therefore sends roughly 3x as
+  fast in aggregate while each individual number stays throttled.
+- `message_template` supports `{first_name}` (first word of the submitted
+  full name), `{full_name}`, and `{contact_number}` placeholders.
+- `message_image`: path (relative to `backend/`) to an image sent alongside
+  the message as a caption. Set to `null` to send text-only messages instead.
+- The worker re-reads `config.json` before each send, so you can tune the
+  delay/template/image live without restarting it.
 
-Run one worker per machine, each with its own `SYSTEM_ID` (0, 1, 2, ...):
-
-```bash
-# Machine / WhatsApp number 1
-SYSTEM_ID=0 python whatsapp_worker.py
-
-# Machine / WhatsApp number 2
-SYSTEM_ID=1 python whatsapp_worker.py
-
-# Machine / WhatsApp number 3
-SYSTEM_ID=2 python whatsapp_worker.py
-```
-
-On first run per `SYSTEM_ID`, a Chrome window opens showing a WhatsApp Web QR
-code - scan it once with that machine's WhatsApp number. The login session is
-cached under `backend/whatsapp_profiles/system_<id>/`, so subsequent runs skip
-the QR step.
-
-**Important - `queue.db` must be reachable by all workers.** For a real
-multi-machine deployment, either:
-- run `app.py` and all `whatsapp_worker.py` processes against a network share
-  or a small shared database (e.g. point `db_path`/swap SQLite for Postgres),
-  or
-- run everything on one machine and only vary `SYSTEM_ID` per Chrome profile
-  (simplest for a prototype - it still uses 3 separate WhatsApp Web sessions
-  and gives you the same load-splitting behavior, just not on 3 physical PCs).
-
-## Handling ~250 simultaneous scans
-
-- The Flask endpoint only does validation + a single SQLite insert, so
-  accepting 250 form submissions in a burst is not the bottleneck.
-- WhatsApp *sending* is inherently serial per number (that's the point of the
-  delay + multiple numbers), so throughput is `num_systems / message_delay_seconds`
-  messages/sec in aggregate. With 3 systems and a 5s delay that's ~36
-  messages/minute; tune `num_systems` and `message_delay_seconds` in
-  `config.json` to match your real volume/blocking-risk tradeoff.
-- SQLite is opened in WAL mode (`backend/db.py`) so the API writing new leads
-  and multiple workers reading/updating their own partitions don't block each
-  other.
-
-## Running locally
+Install deps and run one worker per WhatsApp number, each with its own
+`SYSTEM_ID` (must match `NUM_SYSTEMS` on Vercel - i.e. values `0` through
+`NUM_SYSTEMS - 1`):
 
 ```bash
 cd backend
 pip install -r requirements.txt
-python app.py
+
+# WhatsApp number 1
+set SYSTEM_ID=0 && python whatsapp_worker.py
+
+# WhatsApp number 2 (separate terminal/machine)
+set SYSTEM_ID=1 && python whatsapp_worker.py
+
+# WhatsApp number 3 (separate terminal/machine)
+set SYSTEM_ID=2 && python whatsapp_worker.py
 ```
 
-Then open `frontend/index.html` directly in a mobile-width browser (or serve
-it via any static file server), with `API_BASE` in `script.js` pointed at
-your Flask host (defaults to `http://localhost:5000`).
+(PowerShell: `$env:SYSTEM_ID=0; python whatsapp_worker.py`)
 
-Start one or more workers in separate terminals as described above to start
-sending WhatsApp confirmations.
+On first run per `SYSTEM_ID`, a Chrome window opens showing a WhatsApp Web QR
+code - scan it once with that number's WhatsApp. The session is cached under
+`backend/whatsapp_profiles/system_<id>/`, so future runs skip the QR step.
+Keep these processes running continuously (e.g. via `pm2`, `systemd`, Windows
+Task Scheduler, or NSSM) so sending resumes automatically after a reboot.
+
+## Handling ~250 simultaneous scans
+
+- `POST /api/register` only validates + inserts one row, so a burst of 250
+  submissions hits the database, not a bottleneck in the app logic. Neon/
+  Supabase free tiers comfortably handle this volume of simple inserts.
+- WhatsApp *sending* is inherently serial per number (that's the point of
+  the delay + multiple numbers), so throughput is roughly
+  `NUM_SYSTEMS / message_delay_seconds` messages/sec in aggregate. With 3
+  workers and a 5s delay that's ~36 messages/minute; tune `NUM_SYSTEMS` (on
+  Vercel) and `message_delay_seconds` (per worker) to match your real
+  volume/blocking-risk tradeoff.
+- `claim_next_pending` in `api/db.py` uses `FOR UPDATE SKIP LOCKED`, so two
+  workers can never accidentally grab the same lead.
+
+## Local testing without deploying
+
+You can run the API locally against the same hosted Postgres before
+deploying to Vercel:
+
+```bash
+cd api
+pip install -r ../requirements.txt
+set DATABASE_URL=<your connection string> && python index.py
+```
+
+Then in `frontend/index.html`, temporarily uncomment/set
+`window.MO_API_BASE = "http://localhost:5000";` and open the form directly.
 
 ## Notes / caveats (prototype)
 
@@ -115,8 +162,14 @@ sending WhatsApp confirmations.
   are effectively dead. This is unofficial automation of personal WhatsApp
   accounts; confirm this fits your organization's WhatsApp usage policy
   before running it at real volume.
-- The logo is a hand-built SVG recreation (`frontend/logo.svg`), not the
-  original brand asset file, since the source image wasn't available as a
-  file on disk.
-- Message content in `config.json` is a placeholder - swap in the real copy
-  once provided.
+- The logo is a hand-built SVG recreation (`frontend/logo.svg`) plus the
+  actual brand PNG you supplied (`frontend/MO Logo.png`), used in the form header.
+- Image sending automates WhatsApp Web's attach-photo flow (click attach,
+  feed the file input, type the caption, hit enter). This is the most
+  UI-fragile part of the script - if WhatsApp changes their DOM, the
+  `ATTACH_BUTTON_SELECTOR` / `IMAGE_FILE_INPUT_SELECTOR` / `CAPTION_XPATH`
+  constants at the top of `whatsapp_worker.py` are the first things to
+  re-check (right-click the relevant element in WhatsApp Web -> Inspect).
+- `WORKER_API_KEY` is a simple shared secret, not full auth - fine for a
+  prototype with a small number of trusted workers, but rotate it if it
+  ever leaks, and don't reuse it as a real password anywhere.
