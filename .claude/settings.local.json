@@ -6,7 +6,17 @@
       "Bash(python -c ' *)",
       "Bash(curl -s http://localhost:5000/api/queue/stats)",
       "Bash(python -m py_compile api/index.py api/db.py api/config.py backend/whatsapp_worker.py backend/config.py)",
-      "Bash(python -m py_compile api/index.py)"
+      "Bash(python -m py_compile api/index.py)",
+      "Bash(curl -s -o /dev/null -w \"STATUS:%{http_code}\\\\n\" \"https://mo-first.vercel.app/\")",
+      "Bash(curl -s \"https://mo-first.vercel.app/\")",
+      "Bash(curl -s -o /dev/null -w \"STATUS:%{http_code}\\\\n\" \"https://mo-first.vercel.app/frontend/index.html\")",
+      "Bash(curl -s -o /dev/null -w \"STATUS:%{http_code}\\\\n\" \"https://mo-first.vercel.app/api/queue/stats\")",
+      "Bash(curl -s \"https://mo-first.vercel.app/api/queue/stats\")",
+      "WebFetch(domain:mo-first.vercel.app)",
+      "WebFetch(domain:vercel.com)",
+      "WebFetch(domain:mo-first-git-main-testertest.vercel.app)",
+      "WebFetch(domain:mo-first-bqabukjlf-testertest.vercel.app)",
+      "Bash(python -c \"import json; json.load\\(open\\('vercel.json'\\)\\); print\\('valid json'\\)\")"
     ]
   }
 }
