@@ -1,7 +1,15 @@
+import os
 import re
+import sys
 from functools import wraps
 
 from flask import Flask, jsonify, request
+
+# Vercel's Python runtime imports this file directly by path rather than as
+# part of a package, so api/'s own directory is never added to sys.path -
+# without this, "import db" / "from config import get_config" fail with
+# ModuleNotFoundError even though db.py and config.py sit right next to this file.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import db
 from config import get_config

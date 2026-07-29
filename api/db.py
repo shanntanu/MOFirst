@@ -10,7 +10,11 @@ def get_conn():
     # A fresh connection per request is the right call for serverless (no
     # long-lived process to hold a pool in); Neon/Supabase's pooled
     # connection string (the "-pooler" host) keeps this cheap.
-    return psycopg2.connect(get_config()["database_url"], sslmode="require")
+    #
+    # Don't add sslmode here - Neon/Supabase connection strings already
+    # include "?sslmode=require", and passing it twice (once in the DSN,
+    # once as a kwarg) makes psycopg2/libpq reject the connection outright.
+    return psycopg2.connect(get_config()["database_url"])
 
 
 def init_db():

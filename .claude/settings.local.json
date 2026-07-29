@@ -5,7 +5,8 @@
       "Bash(pip install *)",
       "Bash(python -c ' *)",
       "Bash(curl -s http://localhost:5000/api/queue/stats)",
-      "Bash(python -m py_compile api/index.py api/db.py api/config.py backend/whatsapp_worker.py backend/config.py)"
+      "Bash(python -m py_compile api/index.py api/db.py api/config.py backend/whatsapp_worker.py backend/config.py)",
+      "Bash(python -m py_compile api/index.py)"
     ]
   }
 }
