@@ -18,7 +18,8 @@
       "WebFetch(domain:mo-first-bqabukjlf-testertest.vercel.app)",
       "Bash(python -c \"import json; json.load\\(open\\('vercel.json'\\)\\); print\\('valid json'\\)\")",
       "Bash(mkdir -p public)",
-      "Bash(cp -r frontend/* public/)"
+      "Bash(cp -r frontend/* public/)",
+      "WebFetch(domain:mo-first-oh41vi0c9-testertest.vercel.app)"
     ]
   }
 }
