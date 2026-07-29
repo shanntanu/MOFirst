@@ -57,11 +57,15 @@ ATTACH_BUTTON_SELECTOR = (
 # hidden file input if the page has more than one that accepts images (e.g.
 # a sticker-maker flow) - which is what caused images to send as stickers
 # with no caption field at all.
-PHOTOS_VIDEOS_MENU_ITEM_XPATH = (
-    "//*[self::li or self::div or self::button]"
-    "[.//span[contains(text(),'Photos') and contains(text(),'video')] "
-    "or @aria-label='Photos & videos' or contains(@aria-label,'Photos')]"
-)
+#
+# Target the exact text node directly rather than searching ancestors for
+# "contains a descendant with this text" - that broader search matched the
+# whole menu container (since the container also "contains" this text
+# somewhere in its subtree), so .click() landed on whatever menu item
+# happened to sit at the container's bounding-box center instead of this
+# one. Clicking the text span itself is precise, and the click still
+# bubbles up to the row's real handler like any normal DOM click.
+PHOTOS_VIDEOS_MENU_ITEM_XPATH = "//span[normalize-space()='Photos & videos']"
 IMAGE_FILE_INPUT_SELECTOR = "input[type='file'][accept*='image']"
 # Deliberately narrow - a broader fallback like //div[@contenteditable='true']
 # risks matching some unrelated editable element elsewhere on the page (e.g.
