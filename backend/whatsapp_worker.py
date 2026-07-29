@@ -51,6 +51,17 @@ ATTACH_BUTTON_SELECTOR = (
     "span[data-icon='attach-menu-plus'], span[data-icon='clip'], "
     "div[title='Attach'], button[aria-label='Attach']"
 )
+# The attach button opens a menu (Document / Photos & Videos / Camera / ...).
+# Clicking straight through to a generic input[type=file][accept*=image]
+# without first picking this specific menu item risks grabbing the WRONG
+# hidden file input if the page has more than one that accepts images (e.g.
+# a sticker-maker flow) - which is what caused images to send as stickers
+# with no caption field at all.
+PHOTOS_VIDEOS_MENU_ITEM_XPATH = (
+    "//*[self::li or self::div or self::button]"
+    "[.//span[contains(text(),'Photos') and contains(text(),'video')] "
+    "or @aria-label='Photos & videos' or contains(@aria-label,'Photos')]"
+)
 IMAGE_FILE_INPUT_SELECTOR = "input[type='file'][accept*='image']"
 # Deliberately narrow - a broader fallback like //div[@contenteditable='true']
 # risks matching some unrelated editable element elsewhere on the page (e.g.
@@ -155,6 +166,16 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     attach_btn.click()
     time.sleep(0.5)
 
+    # Must click "Photos & Videos" specifically - jumping straight to any
+    # input[type=file][accept*=image] on the page risks grabbing a different
+    # hidden input tied to another flow (e.g. sticker creation), which is
+    # what caused images to send as stickers with no caption field.
+    photos_menu_item = wait.until(
+        EC.element_to_be_clickable((By.XPATH, PHOTOS_VIDEOS_MENU_ITEM_XPATH))
+    )
+    photos_menu_item.click()
+    time.sleep(0.5)
+
     file_input = wait.until(
         EC.presence_of_element_located((By.CSS_SELECTOR, IMAGE_FILE_INPUT_SELECTOR))
     )
@@ -174,6 +195,20 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     send_btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, SEND_BUTTON_SELECTOR)))
     send_btn.click()
     time.sleep(3)  # image uploads can take longer than a plain text send
+
+
+def _save_debug_screenshot(driver, system_id, lead_id):
+    """Captures what WhatsApp Web actually looked like at the moment of
+    failure - selector mismatches from a WhatsApp UI update are otherwise
+    very hard to diagnose from an exception message alone."""
+    try:
+        debug_dir = Path(__file__).parent / "debug_screenshots"
+        debug_dir.mkdir(exist_ok=True)
+        path = debug_dir / f"system{system_id}_lead{lead_id}_{time.strftime('%Y%m%d-%H%M%S')}.png"
+        driver.save_screenshot(str(path))
+        return path
+    except Exception:
+        return None
 
 
 def run_worker(system_id):
@@ -220,7 +255,10 @@ def run_worker(system_id):
                 print(f"[system {system_id}] sent to {target_number} (lead #{lead['id']})")
             except Exception as exc:
                 report_failed(lead["id"], exc, config)
+                screenshot_path = _save_debug_screenshot(driver, system_id, lead["id"])
                 print(f"[system {system_id}] FAILED lead #{lead['id']}: {exc}")
+                if screenshot_path:
+                    print(f"[system {system_id}] screenshot of the stuck/failed state: {screenshot_path}")
 
             time.sleep(config["message_delay_seconds"])
     finally:
