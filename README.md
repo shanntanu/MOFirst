@@ -7,7 +7,9 @@ absorbs all traffic.
 ## Structure
 
 ```
-frontend/            Static mobile form + thank-you screen
+public/              Static mobile form + thank-you screen - Vercel's zero-config
+                     static-serving convention: everything here is served at
+                     the site root automatically (index.html at "/", etc.)
   index.html, style.css, script.js, logo.svg, message.png (WhatsApp image)
 
 api/                 Deployed to Vercel as serverless functions
@@ -17,7 +19,7 @@ api/                 Deployed to Vercel as serverless functions
   config.py           Reads NUM_SYSTEMS / WORKER_API_KEY / DATABASE_URL from env
   db.py               Postgres-backed queue (hosted DB - Neon/Supabase, etc.)
 
-vercel.json           Routes /api/* to api/index.py, everything else to frontend/
+vercel.json           Routes /api/* to api/index.py; public/ needs no rewrite
 requirements.txt      Python deps for the Vercel function (flask, psycopg2-binary)
 
 backend/               Runs locally on your always-on machine - NOT deployed
@@ -31,7 +33,7 @@ backend/               Runs locally on your always-on machine - NOT deployed
 ## How the pieces fit together
 
 1. A visitor scans a QR/opens the link and fills the form, served from your
-   Vercel deployment (`frontend/index.html`).
+   Vercel deployment (`public/index.html`).
 2. On submit, `script.js` POSTs to `/api/register` - same Vercel domain, so
    no CORS is involved. `api/index.py` validates the fields and inserts a row
    into the `leads` table in your hosted Postgres database.
@@ -85,7 +87,7 @@ Edit `backend/config.json`:
   "worker_api_key": "the same secret you set in Vercel",
   "message_delay_seconds": 5,
   "message_template": "Hi {first_name}, ...",
-  "message_image": "../frontend/message.png",
+  "message_image": "../public/message.png",
   "country_code": "91"
 }
 ```
@@ -152,7 +154,7 @@ pip install -r ../requirements.txt
 set DATABASE_URL=<your connection string> && python index.py
 ```
 
-Then in `frontend/index.html`, temporarily uncomment/set
+Then in `public/index.html`, temporarily uncomment/set
 `window.MO_API_BASE = "http://localhost:5000";` and open the form directly.
 
 ## Notes / caveats (prototype)
@@ -162,8 +164,8 @@ Then in `frontend/index.html`, temporarily uncomment/set
   are effectively dead. This is unofficial automation of personal WhatsApp
   accounts; confirm this fits your organization's WhatsApp usage policy
   before running it at real volume.
-- The logo is a hand-built SVG recreation (`frontend/logo.svg`) plus the
-  actual brand PNG you supplied (`frontend/MO Logo.png`), used in the form header.
+- The logo is a hand-built SVG recreation (`public/logo.svg`) plus the
+  actual brand PNG you supplied (`public/MO Logo.png`), used in the form header.
 - Image sending automates WhatsApp Web's attach-photo flow (click attach,
   feed the file input, type the caption, hit enter). This is the most
   UI-fragile part of the script - if WhatsApp changes their DOM, the

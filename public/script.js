@@ -1,7 +1,7 @@
-// Defaults to the same origin the page was loaded from (works for localhost,
-// ngrok, or any real domain, since app.py serves both the frontend and the
-// API). Override window.MO_API_BASE before this script runs only if the
-// frontend is ever hosted separately from the Flask backend.
+// Defaults to the same origin the page was loaded from - the form (public/)
+// and the API (api/) are both served from the same Vercel deployment.
+// Override window.MO_API_BASE before this script runs only for local testing
+// against `python api/index.py` directly (see the README).
 const API_BASE = window.MO_API_BASE || window.location.origin;
 
 const PHONE_RE = /^[6-9]\d{9}$/;
