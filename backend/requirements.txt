@@ -1,8 +1,14 @@
 selenium==4.23.1
 requests==2.32.3
-# pywin32: Windows clipboard access for pasting the caption text.
+# pywin32: Windows clipboard access, plus finding/activating each worker's
+#          OWN Chrome window (by process tree, not by title - every WhatsApp
+#          Web tab is titled just "WhatsApp", which is ambiguous the moment
+#          more than one worker/system runs on the same machine at once).
+# psutil: walks the process tree from driver.service.process to find that
+#         specific Chrome instance's PID, for the same reason.
 # pyautogui: types the image path into the native Windows file-picker dialog
 #            that WhatsApp's "Photos & videos" attach-menu item opens -
 #            Selenium cannot interact with native OS dialogs at all.
 pywin32==306; sys_platform == 'win32'
+psutil==6.1.0
 pyautogui==0.9.54

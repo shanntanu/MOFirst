@@ -358,8 +358,54 @@ def _foreground_window_title():
         return ""
 
 
+def _find_own_chrome_hwnds(driver):
+    """Finds the actual OS windows belonging to THIS driver's own Chrome
+    process - not just any window with a matching title.
+
+    Matching by title text (e.g. "WhatsApp") is ambiguous the moment more
+    than one worker/system runs on the same machine at once: every WhatsApp
+    Web tab is titled just "WhatsApp" regardless of which profile/number it
+    belongs to, so a title search can't tell System 0's window apart from
+    System 1's. That's a real, confirmed bug - one worker can end up
+    activating a DIFFERENT worker's Chrome window and typing the file path
+    into its dialog instead of its own, while its own dialog just sits there
+    untouched.
+
+    driver.service.process is the actual ChromeDriver process Selenium
+    launched for this driver specifically; ChromeDriver launches Chrome
+    itself as a child process, so walking the process tree gives us the
+    exact Chrome instance this driver owns, and from there the exact OS
+    windows that belong to it.
+    """
+    import psutil
+    import win32gui
+    import win32process
+
+    try:
+        root_pid = driver.service.process.pid
+        pids = {root_pid} | {p.pid for p in psutil.Process(root_pid).children(recursive=True)}
+    except Exception:
+        return []
+
+    matches = []
+
+    def _enum_handler(hwnd, _):
+        if not win32gui.IsWindowVisible(hwnd):
+            return
+        try:
+            _, pid = win32process.GetWindowThreadProcessId(hwnd)
+        except Exception:
+            return
+        if pid in pids:
+            matches.append(hwnd)
+
+    win32gui.EnumWindows(_enum_handler, None)
+    return matches
+
+
 def _activate_browser_window(driver, title_hint="WhatsApp"):
-    """Forces the Chrome/WhatsApp window to be the actual OS-focused window.
+    """Forces THIS driver's own Chrome/WhatsApp window to be the actual
+    OS-focused window.
 
     This matters because pyautogui sends real keystrokes to whichever window
     the operating system currently has focus on - NOT necessarily the Chrome
@@ -376,7 +422,7 @@ def _activate_browser_window(driver, title_hint="WhatsApp"):
     Alt could stay stuck "held down", turning a later ordinary keystroke
     (e.g. the Enter that submits the native file dialog) into an unintended
     Alt-shortcut - Alt+Enter and friends do real things in Chrome. So the
-    Alt tap is now only used as a fallback (plain SetForegroundWindow usually
+    Alt tap is only used as a fallback (plain SetForegroundWindow usually
     just works, since this process is the one that spawned the Chrome
     window), and it's wrapped in try/finally so Alt is released no matter
     what happens in between, instead of appearing right next to
@@ -390,17 +436,25 @@ def _activate_browser_window(driver, title_hint="WhatsApp"):
     except Exception:
         pass
 
-    matches = []
+    hwnds = _find_own_chrome_hwnds(driver)
+    if not hwnds:
+        # Fallback only - ambiguous the moment more than one worker's Chrome
+        # window is open at once, since every WhatsApp Web tab shares this
+        # title. Only used if the PID-based lookup above couldn't run at all
+        # (e.g. psutil missing, or driver.service not exposing a PID).
+        matches = []
 
-    def _enum_handler(hwnd, _):
-        if win32gui.IsWindowVisible(hwnd) and title_hint.lower() in win32gui.GetWindowText(hwnd).lower():
-            matches.append(hwnd)
+        def _enum_handler(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd) and title_hint.lower() in win32gui.GetWindowText(hwnd).lower():
+                matches.append(hwnd)
 
-    win32gui.EnumWindows(_enum_handler, None)
-    if not matches:
+        win32gui.EnumWindows(_enum_handler, None)
+        hwnds = matches
+
+    if not hwnds:
         return False
 
-    hwnd = matches[0]
+    hwnd = hwnds[0]
     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
 
     try:
