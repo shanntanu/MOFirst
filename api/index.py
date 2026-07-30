@@ -70,6 +70,13 @@ def require_worker_key(fn):
 def queue_next():
     system_id = int(request.args.get("system_id", "0"))
     db.init_db()
+
+    db.record_heartbeat(system_id)
+    config = get_config()
+    db.reassign_dead_systems_work(
+        system_id, config["num_systems"], config["worker_stale_seconds"]
+    )
+
     lead = db.claim_next_pending(system_id)
     return jsonify({"lead": lead})
 

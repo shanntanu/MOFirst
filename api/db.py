@@ -57,6 +57,19 @@ def init_db():
                 """
             )
             cur.execute("INSERT INTO settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
+            # Tracks "is a worker actually polling for this system_id right
+            # now" - lets us tell a genuinely dead system apart from one
+            # that's just mid-send, so its stuck pending/failed leads can be
+            # picked up by whichever system is still actually alive instead
+            # of sitting there forever.
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS worker_heartbeats (
+                    system_id INTEGER PRIMARY KEY,
+                    last_seen TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
         conn.commit()
     finally:
         conn.close()
@@ -125,6 +138,61 @@ def claim_next_pending(system_id):
             row = cur.fetchone()
         conn.commit()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def record_heartbeat(system_id):
+    """Marks system_id as "alive right now" - called on every poll, so a
+    system that's just mid-send (not actually dead) keeps refreshing its own
+    heartbeat and never gets its work stolen out from under it."""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO worker_heartbeats (system_id, last_seen)
+                VALUES (%s, now())
+                ON CONFLICT (system_id) DO UPDATE SET last_seen = now()
+                """,
+                (system_id,),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def reassign_dead_systems_work(active_system_id, num_systems, stale_after_seconds):
+    """Adopts pending/failed leads from any OTHER system that hasn't polled
+    in a while into active_system_id - so a crashed/turned-off worker's
+    stuck leads still get sent eventually instead of sitting there forever,
+    picked up by whichever worker happens to still be running.
+
+    A system counts as dead if it has never sent a heartbeat, or its last
+    heartbeat is older than stale_after_seconds. Only pending/failed leads
+    move - never 'processing' or 'sent' ones, so nothing gets pulled out
+    from under an active send.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE leads
+                SET assigned_system = %s, status = 'pending'
+                WHERE assigned_system != %s
+                  AND assigned_system BETWEEN 0 AND (%s - 1)
+                  AND status IN ('pending', 'failed')
+                  AND assigned_system NOT IN (
+                      SELECT system_id FROM worker_heartbeats
+                      WHERE last_seen > now() - (%s || ' seconds')::interval
+                  )
+                """,
+                (active_system_id, active_system_id, num_systems, stale_after_seconds),
+            )
+            moved = cur.rowcount
+        conn.commit()
+        return moved
     finally:
         conn.close()
 

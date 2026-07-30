@@ -49,6 +49,15 @@ backend/               Runs locally on your always-on machine - NOT deployed
 5. On success the thank-you screen shows, with the "Open an Account" button
    linking to `https://ekyc.motilaloswal.com/open-demat-account`.
 
+**If a system goes quiet** (worker crashed, machine turned off, etc.), its
+pending and failed leads don't just sit there forever. Every poll updates a
+heartbeat for that `system_id`, and also checks for any *other* system whose
+heartbeat has gone stale (no poll in `WORKER_STALE_SECONDS`, default 90) -
+that system's pending/failed leads get reassigned to the one currently
+polling, so whichever workers are actually running keep the whole queue
+moving. Leads already mid-send (`processing`) or already `sent` are never
+touched by this.
+
 **Why this split:** Vercel functions are stateless and short-lived with no
 persistent disk - fine for quick DB reads/writes, but incompatible with a
 Selenium/Chrome session that must stay logged into WhatsApp Web for weeks.
@@ -75,6 +84,7 @@ host - since each API request opens a fresh connection).
   | `DATABASE_URL` | the connection string from step 1 |
   | `NUM_SYSTEMS` | how many WhatsApp numbers/workers you're running (e.g. `3`) |
   | `WORKER_API_KEY` | a random secret string you make up - protects the queue endpoints from random internet traffic |
+  | `WORKER_STALE_SECONDS` | optional, default `90` - how long a system can go without polling before its stuck leads get reassigned elsewhere |
 - Deploy. You'll get a URL like `https://your-app.vercel.app` - opening it
   should show the registration form.
 

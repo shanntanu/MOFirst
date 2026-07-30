@@ -86,7 +86,8 @@
       "Bash(python \"C:\\\\Users\\\\SHANTA~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-shantanuwagh-Desktop-Claude-MO\\\\0ddc2db6-b8f2-4db5-aea1-2d1eff3807e1\\\\scratchpad\\\\test_msg_limit.py\")",
       "Bash(python -m py_compile api/index.py api/db.py api/config.py)",
       "Bash(python \"C:\\\\Users\\\\SHANTA~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-shantanuwagh-Desktop-Claude-MO\\\\0ddc2db6-b8f2-4db5-aea1-2d1eff3807e1\\\\scratchpad\\\\test_settings_api.py\")",
-      "Bash(python \"C:\\\\Users\\\\SHANTA~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-shantanuwagh-Desktop-Claude-MO\\\\0ddc2db6-b8f2-4db5-aea1-2d1eff3807e1\\\\scratchpad\\\\test_dialog_detect.py\")"
+      "Bash(python \"C:\\\\Users\\\\SHANTA~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-shantanuwagh-Desktop-Claude-MO\\\\0ddc2db6-b8f2-4db5-aea1-2d1eff3807e1\\\\scratchpad\\\\test_dialog_detect.py\")",
+      "Bash(python -m py_compile api/db.py api/index.py api/config.py)"
     ]
   }
 }
