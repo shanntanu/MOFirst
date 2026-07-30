@@ -166,12 +166,26 @@ Then in `public/index.html`, temporarily uncomment/set
   before running it at real volume.
 - The logo is a hand-built SVG recreation (`public/logo.svg`) plus the
   actual brand PNG you supplied (`public/MO Logo.png`), used in the form header.
-- Image sending automates WhatsApp Web's attach-photo flow (click attach,
-  feed the file input, type the caption, hit enter). This is the most
-  UI-fragile part of the script - if WhatsApp changes their DOM, the
-  `ATTACH_BUTTON_SELECTOR` / `IMAGE_FILE_INPUT_SELECTOR` / `CAPTION_XPATH`
-  constants at the top of `whatsapp_worker.py` are the first things to
-  re-check (right-click the relevant element in WhatsApp Web -> Inspect).
+- Image+caption sending deliberately avoids three traps, all documented in the
+  module docstring of `whatsapp_worker.py`:
+  1. It never clicks the attach menu's "Photos & videos" row - that makes
+     WhatsApp open a native Windows file dialog, which Selenium cannot touch,
+     and the script hangs. The file is set on the input via CDP
+     `DOM.setFileInputFiles` instead.
+  2. Clipboard paste (`Ctrl+V`) is the fallback, not the primary, because the
+     OS clipboard is machine-wide: with several workers on one machine, two
+     concurrent pastes could send the wrong image to the wrong chat. A
+     cross-process lock (`_ClipboardLock`) guards it.
+  3. The caption is inserted with CDP `Input.insertText`, never `send_keys` -
+     ChromeDriver rejects non-BMP emoji (the copy contains U+1F389, U+1F4BB,
+     U+1F5D3), and a raw newline in the caption box fires Enter, which sends
+     a truncated message.
+- Selector fragility remains the most likely future breakage. If sending stops
+  working after a WhatsApp update, re-check `CAPTION_XPATH`,
+  `SEND_BUTTON_SELECTOR`, `ATTACH_BUTTON_SELECTOR` and `FILE_INPUT_SELECTOR` at
+  the top of `whatsapp_worker.py` (right-click the element in WhatsApp Web ->
+  Inspect). Every failure saves a screenshot to `backend/debug_screenshots/`
+  showing exactly what was on screen at the time.
 - `WORKER_API_KEY` is a simple shared secret, not full auth - fine for a
   prototype with a small number of trusted workers, but rotate it if it
   ever leaks, and don't reuse it as a real password anywhere.
