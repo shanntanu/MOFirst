@@ -25,29 +25,33 @@ It is unofficial automation of a personal WhatsApp account - respect WhatsApp's
 terms of use and your own organization's policies before running this at volume.
 
 
-HOW IMAGE SENDING WORKS - pure clipboard paste, no attach menu at all
-----------------------------------------------------------------------
+HOW IMAGE SENDING WORKS - pure clipboard paste, no attach menu, no clicks
+--------------------------------------------------------------------------
 Clicking WhatsApp's attach menu ("Photos & videos") makes WhatsApp call the
 hidden <input type=file>'s native .click(), which opens a REAL Windows
 file-picker dialog. Selenium cannot interact with native OS dialogs at all -
 they live outside the browser process - so that path hangs indefinitely.
 
-So sending never touches the attach menu or any file input. Instead:
+So sending never touches the attach menu, any file input, or a caption/send
+button selector. It's exactly six steps:
   1. Copy the image onto the Windows clipboard (as CF_DIB).
-  2. Click the chat's message box and press Ctrl+V - WhatsApp treats this
+  2. Open the chat.
+  3. Click the chat's message box and press Ctrl+V - WhatsApp treats this
      exactly like a user pasting an image, and opens its own image-preview
-     screen with a caption box, no dialog involved.
-  3. Copy the caption text onto the clipboard (as CF_UNICODETEXT) and paste
-     that into the caption box with Ctrl+V. Pasting (rather than send_keys)
-     is also what makes the emoji-heavy, multi-line message text work at all:
-     ChromeDriver's send_keys rejects characters outside the Basic
-     Multilingual Plane (the message contains U+1F389, U+1F4BB, U+1F5D3), and
-     a raw newline sent via send_keys fires Enter, which sends prematurely.
-     A pasted newline is just a line break, not a keypress.
-  4. Click the Send button.
+     screen with a caption box, no dialog involved, and moves keyboard focus
+     into that caption box automatically.
+  4. Copy the caption text onto the clipboard (as CF_UNICODETEXT).
+  5. Paste directly (Ctrl+V) - no click needed, focus is already on the
+     caption box from step 3. Pasting (rather than send_keys) is also what
+     makes the emoji-heavy, multi-line message text work at all: ChromeDriver's
+     send_keys rejects characters outside the Basic Multilingual Plane (the
+     message contains U+1F389, U+1F4BB, U+1F5D3), and a raw newline sent via
+     send_keys fires Enter, which sends prematurely. A pasted newline is just
+     a line break, not a keypress.
+  6. Press Enter to send.
 
-set_image_send controls whether this runs at all - see message_image /
-send_image in config.json.
+send_image (in config.json) controls whether this runs at all - false, or no
+message_image configured, sends text-only instead.
 
 The OS clipboard is one machine-wide resource. If more than one worker runs
 on this machine, two of them pasting at the same moment could hand the wrong
@@ -79,20 +83,6 @@ from config import get_config
 WHATSAPP_WEB_URL = "https://web.whatsapp.com"
 SEND_BOX_XPATH = "//footer//div[@contenteditable='true']"
 QR_CODE_SELECTOR = "canvas[aria-label='Scan this QR code to link a device!'], div[data-testid='qrcode']"
-# Deliberately narrow - a broader fallback like //div[@contenteditable='true']
-# risks matching some unrelated editable element elsewhere on the page (e.g.
-# the search box), which then silently absorbs the caption while the actual
-# image-preview dialog just sits there looking "stuck".
-CAPTION_XPATH = (
-    "//div[@contenteditable='true'][@aria-placeholder='Add a caption']"
-    " | //div[@contenteditable='true'][@aria-label='Add a caption']"
-    " | //div[@aria-placeholder='Add a caption']"
-    " | //div[@aria-label='Add a caption']"
-)
-SEND_BUTTON_SELECTOR = (
-    "span[data-icon='send'], span[data-icon='wds-ic-send-filled'], "
-    "button[aria-label='Send'], div[aria-label='Send']"
-)
 
 
 # ---- Remote queue client (talks to api/index.py on Vercel) ----
@@ -291,21 +281,12 @@ def _copy_text_to_clipboard(text):
         win32clipboard.CloseClipboard()
 
 
-def _click_send(driver, wait):
-    try:
-        send_btn = wait.until(
-            EC.element_to_be_clickable((By.CSS_SELECTOR, SEND_BUTTON_SELECTOR))
-        )
-        send_btn.click()
-        return
-    except Exception:
-        # With the caption already pasted in, a single Enter is safe here and
-        # is the documented way to send from the preview screen.
-        caption_box = driver.find_element(By.XPATH, CAPTION_XPATH)
-        caption_box.send_keys(Keys.ENTER)
-
-
 def send_image_with_caption(driver, phone_10digit, caption, image_path, country_code):
+    """Exactly six steps, no element-hunting for a caption box or send
+    button: copy image -> open chat -> paste image (Ctrl+V) -> copy text ->
+    paste text (Ctrl+V) -> Enter. WhatsApp moves keyboard focus onto its own
+    caption field the moment the image paste lands, so the second paste and
+    the Enter just go to whatever currently has focus."""
     if not Path(image_path).is_file():
         raise FileNotFoundError(f"message_image not found on disk: {image_path}")
 
@@ -313,40 +294,24 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     wait = WebDriverWait(driver, 30)
 
     with _ClipboardLock():
-        # 1. Copy the image, paste into the chat box -> opens the image
-        #    preview screen with a caption field. No attach menu, no dialog.
+        # 1-3. Copy the image, click the chat, paste it in.
         _copy_image_to_clipboard(image_path)
         send_box = wait.until(EC.presence_of_element_located((By.XPATH, SEND_BOX_XPATH)))
         send_box.click()
         time.sleep(0.3)
         send_box.send_keys(Keys.CONTROL, "v")
+        time.sleep(1.5)  # let the image preview screen finish opening
 
-        caption_box = wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
-        time.sleep(1)  # let the image preview finish rendering before pasting text
-
-        # 2. Copy the caption text, paste into the caption box.
+        # 4-5. Copy the caption text, paste it directly - no click, WhatsApp
+        # has already moved focus to its own caption field.
         _copy_text_to_clipboard(caption)
-        caption_box.click()
-        time.sleep(0.3)
-        caption_box.send_keys(Keys.CONTROL, "v")
+        active = driver.switch_to.active_element
+        active.send_keys(Keys.CONTROL, "v")
         time.sleep(0.5)
 
-        if not (caption_box.get_attribute("textContent") or "").strip():
-            raise RuntimeError(
-                "caption box was still empty after pasting - the paste didn't register"
-            )
-
-    # 3. Send. Clipboard lock is released before this - clicking Send doesn't
-    #    touch the clipboard, so no need to hold it any longer.
-    _click_send(driver, wait)
-
-    # The preview dialog closing is the observable signal that WhatsApp
-    # accepted the send; without this the worker could report success for a
-    # message still sitting unsent on screen.
-    WebDriverWait(driver, 60).until(
-        EC.invisibility_of_element_located((By.XPATH, CAPTION_XPATH))
-    )
-    time.sleep(2)  # let the upload finish before navigating to the next chat
+    # 6. Send.
+    active.send_keys(Keys.ENTER)
+    time.sleep(3)  # image uploads can take longer than a plain text send
 
 
 def _save_debug_screenshot(driver, system_id, lead_id):
