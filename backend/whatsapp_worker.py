@@ -336,9 +336,18 @@ def _activate_browser_window(driver, title_hint="WhatsApp"):
     can go to the wrong window entirely and silently do nothing useful - no
     error, just an image that never attaches.
 
-    Windows also actively prevents background processes from stealing
-    foreground focus via SetForegroundWindow alone; tapping Alt first is the
-    standard, documented workaround that satisfies that restriction.
+    Windows can also refuse a plain SetForegroundWindow call from a
+    background process. Tapping Alt first is the standard workaround for
+    that - but it's real OS-level key state, held down and then released as
+    two separate calls. If anything ever went wrong between those two calls,
+    Alt could stay stuck "held down", turning a later ordinary keystroke
+    (e.g. the Enter that submits the native file dialog) into an unintended
+    Alt-shortcut - Alt+Enter and friends do real things in Chrome. So the
+    Alt tap is now only used as a fallback (plain SetForegroundWindow usually
+    just works, since this process is the one that spawned the Chrome
+    window), and it's wrapped in try/finally so Alt is released no matter
+    what happens in between, instead of appearing right next to
+    SetForegroundWindow with nothing guaranteeing cleanup order.
     """
     import win32con
     import win32gui
@@ -359,16 +368,24 @@ def _activate_browser_window(driver, title_hint="WhatsApp"):
         return False
 
     hwnd = matches[0]
-    try:
-        import win32api
+    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
 
-        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-        win32api.keybd_event(0x12, 0, 0, 0)  # ALT down
-        win32api.keybd_event(0x12, 0, 2, 0)  # ALT up
+    try:
+        win32gui.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        pass
+
+    import win32api
+
+    win32api.keybd_event(0x12, 0, 0, 0)  # ALT down
+    try:
         win32gui.SetForegroundWindow(hwnd)
         return True
     except Exception:
         return False
+    finally:
+        win32api.keybd_event(0x12, 0, 2, 0)  # ALT up - guaranteed, whatever happened above
 
 
 def _click_attach_button(driver, wait):
@@ -479,6 +496,22 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     time.sleep(3)  # image uploads can take longer than a plain text send
 
 
+def _is_driver_alive(driver):
+    """A cheap probe for whether the Chrome session is still usable.
+
+    Checking the exception message text (e.g. "invalid session id") is
+    brittle across ChromeDriver versions/locales - actually trying a trivial
+    call and seeing if IT also fails is a much more reliable signal that the
+    browser process itself is gone, not just that one particular action
+    failed for some other reason.
+    """
+    try:
+        _ = driver.title
+        return True
+    except Exception:
+        return False
+
+
 def _save_debug_screenshot(driver, system_id, lead_id):
     """Captures what WhatsApp Web actually looked like at the moment of
     failure - selector mismatches from a WhatsApp UI update are otherwise
@@ -557,6 +590,20 @@ def run_worker(system_id):
                 print(f"[system {system_id}] FAILED lead #{lead['id']}: {exc}")
                 if screenshot_path:
                     print(f"[system {system_id}] screenshot of the stuck/failed state: {screenshot_path}")
+
+                if not _is_driver_alive(driver):
+                    # Without this, every subsequent lead would fail the exact
+                    # same way forever - Chrome crashing once shouldn't take
+                    # down the whole run, just this one send.
+                    print(f"[system {system_id}] the Chrome session has crashed/closed - "
+                          f"restarting the browser and logging back in...")
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
+                    driver = build_driver(system_id, config)
+                    wait_for_login(driver)
+                    print(f"[system {system_id}] browser restarted, resuming...")
 
             time.sleep(config["message_delay_seconds"])
     finally:
