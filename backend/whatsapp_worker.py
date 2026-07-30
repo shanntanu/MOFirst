@@ -101,11 +101,44 @@ QR_CODE_SELECTOR = "canvas[aria-label='Scan this QR code to link a device!'], di
 # the search box), which then silently swallows the caption paste while the
 # real preview dialog sits there looking untouched.
 CAPTION_XPATH = (
-    "//div[@contenteditable='true'][@aria-placeholder='Add a caption']"
+    # Confirmed by directly inspecting a live caption box: WhatsApp builds it
+    # with Meta's Lexical editor, as a <p class="selectable-text
+    # copyable-text ..."><span data-lexical-text="true">...</span></p>
+    # structure inside a contenteditable root - NOT a plain aria-labeled div,
+    # which is why the guesses below never matched anything real. This walks
+    # up from that confirmed real structure to its editable ancestor, rather
+    # than guessing at attributes we can't see.
+    "//p[contains(concat(' ', normalize-space(@class), ' '), ' selectable-text ')]"
+    "[contains(concat(' ', normalize-space(@class), ' '), ' copyable-text ')]"
+    "/ancestor::div[@contenteditable='true'][1]"
+    " | //div[@contenteditable='true'][@aria-placeholder='Add a caption']"
     " | //div[@contenteditable='true'][@aria-label='Add a caption']"
     " | //div[@aria-placeholder='Add a caption']"
     " | //div[@aria-label='Add a caption']"
 )
+
+
+def _find_visible_caption_box(driver):
+    """A custom wait condition, used instead of EC.visibility_of_element_located.
+
+    Verified by testing: if a hidden duplicate exists elsewhere in the DOM
+    (e.g. the main chat box, built with the same Lexical text structure,
+    just covered by the image-preview overlay), CAPTION_XPATH can match BOTH
+    it and the real caption box. Selenium's find_element (singular) always
+    returns whichever match comes FIRST in document order, regardless of
+    which one is actually visible - so if that first match happens to be the
+    hidden duplicate, EC.visibility_of_element_located would poll that same
+    hidden element forever and never even consider the second match. This
+    checks every match's actual visibility directly instead of trusting
+    document order to put the right one first.
+    """
+    for el in driver.find_elements(By.XPATH, CAPTION_XPATH):
+        try:
+            if el.is_displayed():
+                return el
+        except Exception:
+            continue
+    return False
 # From a Selenium IDE recording against a live session, combined with the
 # semantic aria-label/title guesses used before that recording existed - the
 # recorded selector is tried first since it reflects the actual current
@@ -491,7 +524,7 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     # immediately after it merely appears in the DOM (present != actually
     # ready) is what silently swallowed the paste before, with nothing to
     # show for it and nothing raised.
-    wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
+    wait.until(_find_visible_caption_box)
     time.sleep(1.5)
 
     caption_box = _paste_caption_with_retry(driver, wait, caption)
@@ -508,7 +541,7 @@ def _paste_caption_with_retry(driver, wait, caption, attempts=4):
     exception and nothing visibly pasted."""
     last_seen = ""
     for attempt in range(1, attempts + 1):
-        caption_box = wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
+        caption_box = wait.until(_find_visible_caption_box)
         caption_box.click()
         time.sleep(0.4)
 
