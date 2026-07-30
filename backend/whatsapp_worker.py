@@ -401,27 +401,43 @@ def _select_file_in_native_dialog(image_path, max_wait_seconds=10.0):
     """
     import pyautogui
 
-    # Waiting for the foreground window to actually change (instead of a
-    # blind sleep) both gives the dialog time to open and gives us a real
-    # signal to fail loudly on if it never does, rather than typing blind.
-    initial_title = _foreground_window_title()
+    # Confirmed by an earlier live run: the dialog's real title is "Open".
+    # By the time this function starts, Chrome may have ALREADY opened and
+    # focused it (the click that triggers it can complete faster than our
+    # own code reaches this line) - so this checks whether the CURRENT
+    # foreground window already is the dialog, not whether it has "changed"
+    # from some earlier snapshot. Waiting for a change was the actual bug:
+    # if the dialog was already focused when we took that snapshot, it could
+    # never register as "changed away from" itself.
     deadline = time.time() + max_wait_seconds
-    while time.time() < deadline:
-        if _foreground_window_title() != initial_title:
-            break
+    title = _foreground_window_title()
+    while "open" not in title.lower():
+        if time.time() > deadline:
+            raise RuntimeError(
+                "the native file-picker dialog never became the focused window "
+                f"(current foreground window is {title!r}) - the image was never attached"
+            )
         time.sleep(0.2)
-    else:
-        raise RuntimeError(
-            "the native file-picker dialog never appeared to grab focus "
-            f"(foreground window stayed {initial_title!r} the whole time) - "
-            "the image was never attached"
-        )
+        title = _foreground_window_title()
 
-    time.sleep(0.4)  # let the dialog finish rendering after gaining focus
+    time.sleep(0.4)  # let the dialog finish rendering now that it's confirmed focused
     pyautogui.write(image_path, interval=0.02)
     time.sleep(0.3)
     pyautogui.press("enter")
     time.sleep(0.5)
+
+    # Confirm the dialog actually closed (i.e. accepted the path) rather than
+    # staying open with an error of its own (bad path, file not found, etc.).
+    closing_deadline = time.time() + 5
+    title = _foreground_window_title()
+    while "open" in title.lower():
+        if time.time() > closing_deadline:
+            raise RuntimeError(
+                "the file dialog was still open after pressing Enter - it likely "
+                "rejected the path (check message_image resolves to a real file)"
+            )
+        time.sleep(0.2)
+        title = _foreground_window_title()
 
 
 def send_image_with_caption(driver, phone_10digit, caption, image_path, country_code):
