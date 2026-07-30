@@ -37,9 +37,10 @@ backend/               Runs locally on your always-on machine - NOT deployed
 2. On submit, `script.js` POSTs to `/api/register` - same Vercel domain, so
    no CORS is involved. `api/index.py` validates the fields and inserts a row
    into the `leads` table in your hosted Postgres database.
-3. Each lead is deterministically assigned to one of `NUM_SYSTEMS` partitions
-   (hash of the WhatsApp/contact number `% NUM_SYSTEMS`), so a given phone
-   number always routes to the same worker even across restarts.
+3. Each lead is assigned to a system in strict round-robin order as they
+   arrive - the 1st lead goes to system 0, the 2nd to system 1, the 3rd to
+   system 2, the 4th back to system 0, and so on - splitting load evenly
+   across your `NUM_SYSTEMS` numbers regardless of arrival patterns.
 4. On the machine you keep WhatsApp Web logged into, `whatsapp_worker.py`
    polls `GET /api/queue/next?system_id=<SYSTEM_ID>` every couple of seconds
    over plain outbound HTTPS - no inbound port, no tunnel needed. When it
@@ -85,31 +86,34 @@ Edit `backend/config.json`:
 {
   "api_base": "https://your-app.vercel.app",
   "worker_api_key": "the same secret you set in Vercel",
-  "message_delay_seconds": 5,
-  "message_template": "Hi {first_name}, ...",
-  "message_image": "../public/message.png",
-  "msg_limit": 200,
   "country_code": "91"
 }
 ```
 
-- `api_base` / `worker_api_key` must match your Vercel deployment/env var.
-- `message_delay_seconds`: seconds between two WhatsApp sends **on the same
-  machine**. Running 3 workers in parallel therefore sends roughly 3x as
-  fast in aggregate while each individual number stays throttled.
-- `message_template` supports `{first_name}` (first word of the submitted
-  full name), `{full_name}`, and `{contact_number}` placeholders.
-- `message_image`: path (relative to `backend/`) to an image sent alongside
-  the message as a caption. Set to `null` to send text-only messages instead.
-- `msg_limit`: caps how many messages **this one worker/number** will send
+`api_base` / `worker_api_key` must match your Vercel deployment/env var -
+these two (plus `country_code`, `chrome_profile_root`, `headless`) are
+genuinely local to this machine and stay in `config.json`.
+
+**`message_delay_seconds`, `message_template`, `message_image`, `send_image`,
+and `msg_limit` are controlled from `https://your-app.vercel.app/admin.html`
+instead** - not `config.json`. They live in the same Postgres database as the
+lead queue, so:
+- Open `/admin.html`, enter the same `worker_api_key`, click **Load**, edit,
+  **Save**.
+- Every running worker re-fetches these on its next loop iteration (every
+  couple of seconds) and applies the change immediately - no restart needed,
+  even mid-run.
+- `config.json` still carries fallback values for these 5 fields (used only
+  if a worker can't reach the settings API at all, e.g. no network), and
+  `init_db()` seeds sensible defaults into Postgres the first time it runs.
+- `msg_limit` caps how many messages **this one worker/number** will send
   **per run**, as a safety net against WhatsApp flagging/blocking a number
   for sending too much. Once reached, the worker prints a message and stops
   itself (it does not crash or lose the queue - pending leads just stay
-  queued). Set to `null` for no limit. Restart the worker (after raising
-  `msg_limit` if needed) to resume sending once you're ready for more.
-- The worker re-reads `config.json` before each send, so you can tune the
-  delay/template/image/limit live - though `msg_limit` itself only takes
-  effect from the next restart, since the sent-count resets to 0 each run.
+  queued). Leave empty for no limit. Restart the worker (after raising
+  `msg_limit` on the admin page if needed) to resume sending - the sent-count
+  resets to 0 each run, so raising the limit alone doesn't require a restart,
+  but getting past an already-reached limit does.
 
 Install deps and run one worker per WhatsApp number, each with its own
 `SYSTEM_ID` (must match `NUM_SYSTEMS` on Vercel - i.e. values `0` through

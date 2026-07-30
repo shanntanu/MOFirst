@@ -94,6 +94,55 @@ def queue_stats():
     return jsonify({"config": get_config(), "stats": db.queue_stats()})
 
 
+@app.route("/api/settings", methods=["GET"])
+@require_worker_key
+def settings_get():
+    """Backs the admin page (public/admin.html) AND is polled by
+    whatsapp_worker.py, so message_delay_seconds/message_template/
+    message_image/send_image/msg_limit can be changed from the browser and
+    take effect on running workers without touching config.json or
+    restarting anything."""
+    db.init_db()
+    return jsonify(db.get_settings())
+
+
+@app.route("/api/settings", methods=["POST"])
+@require_worker_key
+def settings_update():
+    payload = request.get_json(silent=True) or {}
+
+    try:
+        message_delay_seconds = int(payload.get("message_delay_seconds"))
+        if message_delay_seconds < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "message_delay_seconds must be a non-negative integer"}), 400
+
+    message_template = payload.get("message_template")
+    if not message_template or not str(message_template).strip():
+        return jsonify({"error": "message_template cannot be empty"}), 400
+
+    message_image = (payload.get("message_image") or "").strip() or None
+    send_image = bool(payload.get("send_image"))
+
+    msg_limit_raw = payload.get("msg_limit")
+    if msg_limit_raw in (None, "", "null"):
+        msg_limit = None
+    else:
+        try:
+            msg_limit = int(msg_limit_raw)
+            if msg_limit < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            return jsonify({"error": "msg_limit must be a positive integer or empty for unlimited"}), 400
+
+    db.init_db()
+    updated = db.update_settings(
+        message_delay_seconds, message_template, message_image, send_image, msg_limit
+    )
+    return jsonify({"success": True, "settings": updated})
+
+
 if __name__ == "__main__":
     # Local testing only: `python index.py` with DATABASE_URL set in your
     # environment. Vercel itself runs this file as a WSGI serverless

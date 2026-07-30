@@ -154,6 +154,32 @@ def report_failed(lead_id, error, config):
     resp.raise_for_status()
 
 
+def fetch_remote_settings(config):
+    """message_delay_seconds / message_template / message_image / send_image
+    / msg_limit are editable from public/admin.html, which writes them into
+    the same Postgres database via GET/POST /api/settings - not into this
+    machine's config.json. Pulling them here on every loop iteration is what
+    makes an edit on the admin page take effect on a running worker without
+    a restart.
+
+    config.json still supplies these as a fallback (used only if this fetch
+    fails, e.g. no network) plus everything that's genuinely local to this
+    machine: api_base, worker_api_key, country_code, chrome_profile_root,
+    headless.
+    """
+    try:
+        resp = requests.get(
+            f"{config['api_base']}/api/settings",
+            headers={"X-Worker-Key": config["worker_api_key"]},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        return resp.json()
+    except requests.RequestException as exc:
+        print(f"could not fetch remote settings, using local config.json values instead: {exc}")
+        return {}
+
+
 # ---- Selenium / WhatsApp Web ----
 
 def build_driver(system_id, config):
@@ -290,7 +316,64 @@ def _copy_text_to_clipboard(text):
         win32clipboard.CloseClipboard()
 
 
+def _foreground_window_title():
+    import win32gui
+
+    try:
+        return win32gui.GetWindowText(win32gui.GetForegroundWindow())
+    except Exception:
+        return ""
+
+
+def _activate_browser_window(driver, title_hint="WhatsApp"):
+    """Forces the Chrome/WhatsApp window to be the actual OS-focused window.
+
+    This matters because pyautogui sends real keystrokes to whichever window
+    the operating system currently has focus on - NOT necessarily the Chrome
+    window Selenium is driving. Starting this script doesn't put Chrome in
+    the foreground by itself (the terminal you launched it from often still
+    is), so without this, pyautogui's keystrokes for the native file dialog
+    can go to the wrong window entirely and silently do nothing useful - no
+    error, just an image that never attaches.
+
+    Windows also actively prevents background processes from stealing
+    foreground focus via SetForegroundWindow alone; tapping Alt first is the
+    standard, documented workaround that satisfies that restriction.
+    """
+    import win32con
+    import win32gui
+
+    try:
+        driver.switch_to.window(driver.current_window_handle)
+    except Exception:
+        pass
+
+    matches = []
+
+    def _enum_handler(hwnd, _):
+        if win32gui.IsWindowVisible(hwnd) and title_hint.lower() in win32gui.GetWindowText(hwnd).lower():
+            matches.append(hwnd)
+
+    win32gui.EnumWindows(_enum_handler, None)
+    if not matches:
+        return False
+
+    hwnd = matches[0]
+    try:
+        import win32api
+
+        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32api.keybd_event(0x12, 0, 0, 0)  # ALT down
+        win32api.keybd_event(0x12, 0, 2, 0)  # ALT up
+        win32gui.SetForegroundWindow(hwnd)
+        return True
+    except Exception:
+        return False
+
+
 def _click_attach_button(driver, wait):
+    _activate_browser_window(driver)
+    time.sleep(0.2)
     btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ATTACH_BUTTON_SELECTOR)))
     btn.click()
 
@@ -305,22 +388,40 @@ def _click_photos_videos(driver, wait):
     item.click()
 
 
-def _select_file_in_native_dialog(image_path, wait_seconds=2.0):
+def _select_file_in_native_dialog(image_path, max_wait_seconds=10.0):
     """Feeds the image path into the real Windows "Open" file-picker dialog
     that WhatsApp's "Photos & videos" click triggers.
 
     Selenium cannot see or interact with this dialog at all - it's a native
     OS window, not a browser tab/frame. pyautogui instead sends real
     OS-level keystrokes, which the dialog receives normally because it
-    auto-focuses its filename box the moment it opens. Typing the full path
-    and pressing Enter is equivalent to browsing to and picking that file.
+    auto-focuses its filename box the moment it opens - AS LONG AS that
+    dialog (or its parent Chrome window) is genuinely the OS-focused window,
+    which _activate_browser_window is what makes true before this runs.
     """
     import pyautogui
 
-    time.sleep(wait_seconds)  # let the native dialog finish opening/focusing
-    pyautogui.write(image_path, interval=0.01)
+    # Waiting for the foreground window to actually change (instead of a
+    # blind sleep) both gives the dialog time to open and gives us a real
+    # signal to fail loudly on if it never does, rather than typing blind.
+    initial_title = _foreground_window_title()
+    deadline = time.time() + max_wait_seconds
+    while time.time() < deadline:
+        if _foreground_window_title() != initial_title:
+            break
+        time.sleep(0.2)
+    else:
+        raise RuntimeError(
+            "the native file-picker dialog never appeared to grab focus "
+            f"(foreground window stayed {initial_title!r} the whole time) - "
+            "the image was never attached"
+        )
+
+    time.sleep(0.4)  # let the dialog finish rendering after gaining focus
+    pyautogui.write(image_path, interval=0.02)
     time.sleep(0.3)
     pyautogui.press("enter")
+    time.sleep(0.5)
 
 
 def send_image_with_caption(driver, phone_10digit, caption, image_path, country_code):
@@ -388,13 +489,16 @@ def run_worker(system_id):
 
     try:
         while True:
-            config = get_config()  # re-read so delay/template/image edits apply live
+            config = get_config()  # local file: re-read so api_base/etc edits apply live
+            remote = fetch_remote_settings(config)
+            if remote:
+                config = {**config, **remote}  # admin.html's values win over config.json's
 
             msg_limit = config.get("msg_limit")
             if msg_limit is not None and sent_count >= msg_limit:
                 print(f"[system {system_id}] msg_limit ({msg_limit}) reached - stopping "
                       f"so this number doesn't send too much and get blocked. Restart "
-                      f"this worker (or raise msg_limit in config.json) to keep sending.")
+                      f"this worker (or raise msg_limit on the admin page) to keep sending.")
                 break
 
             try:

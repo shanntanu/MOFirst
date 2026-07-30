@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Motilal Oswal - Worker Settings</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .admin-shell {
+    max-width: 640px;
+    margin: 0 auto;
+    min-height: 100vh;
+    background: var(--mo-bg);
+    padding: 32px 24px 48px;
+  }
+  .admin-title {
+    color: var(--mo-navy);
+    font-size: 26px;
+    font-weight: 700;
+    margin: 0 0 6px;
+  }
+  .admin-subtitle {
+    color: #6b6b76;
+    font-size: 14px;
+    margin: 0 0 28px;
+  }
+  .key-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 28px;
+  }
+  .key-row input {
+    flex: 1;
+    padding: 12px 14px;
+    border: 1px solid var(--mo-border);
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .key-row button {
+    padding: 12px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--mo-navy);
+    background: #fff;
+    color: var(--mo-navy);
+    font-weight: 600;
+    cursor: pointer;
+  }
+  fieldset {
+    border: 1px solid var(--mo-border);
+    border-radius: 10px;
+    padding: 20px;
+    margin: 0 0 20px;
+  }
+  fieldset[disabled] { opacity: 0.5; }
+  legend {
+    padding: 0 8px;
+    font-weight: 700;
+    color: var(--mo-text);
+    font-size: 15px;
+  }
+  .field { margin-bottom: 18px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label {
+    display: block;
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 6px;
+  }
+  .field .hint {
+    font-size: 12px;
+    color: #8a8a94;
+    margin-top: 4px;
+  }
+  .field input[type="text"],
+  .field input[type="number"],
+  .field textarea {
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--mo-border);
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .field textarea {
+    min-height: 160px;
+    resize: vertical;
+    white-space: pre-wrap;
+  }
+  .checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .checkbox-field input { width: 18px; height: 18px; }
+  .save-btn {
+    width: 100%;
+    padding: 14px;
+    border-radius: 8px;
+    border: none;
+    background: var(--mo-navy);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .save-btn:disabled { background: var(--mo-disabled-bg); color: var(--mo-disabled-text); cursor: not-allowed; }
+  .status-msg { text-align: center; margin-top: 14px; font-size: 14px; min-height: 18px; }
+  .status-msg.error { color: var(--mo-red); }
+  .status-msg.success { color: #1e8e5a; }
+</style>
+</head>
+<body>
+<div class="admin-shell">
+  <div class="admin-title">Worker Settings</div>
+  <div class="admin-subtitle">
+    Controls what whatsapp_worker.py sends. Changes here apply to every
+    running worker on its next loop iteration - no restart needed.
+  </div>
+
+  <div class="key-row">
+    <input type="text" id="workerKey" placeholder="Worker key (same as WORKER_API_KEY)" autocomplete="off">
+    <button type="button" id="loadBtn">Load</button>
+  </div>
+
+  <form id="settingsForm">
+    <fieldset id="fields" disabled>
+      <legend>Message</legend>
+
+      <div class="field">
+        <label for="messageTemplate">Message template</label>
+        <textarea id="messageTemplate" placeholder="Hi {first_name}, ..."></textarea>
+        <div class="hint">Placeholders: {first_name}, {full_name}, {contact_number}</div>
+      </div>
+
+      <div class="field">
+        <label for="messageImage">Image path (relative to backend/, empty = text-only)</label>
+        <input type="text" id="messageImage" placeholder="../public/message.png">
+      </div>
+
+      <div class="field checkbox-field">
+        <input type="checkbox" id="sendImage">
+        <label for="sendImage" style="margin:0;">Send the image (uncheck for text-only messages)</label>
+      </div>
+    </fieldset>
+
+    <fieldset id="throttleFields" disabled>
+      <legend>Throttling</legend>
+
+      <div class="field">
+        <label for="delaySeconds">Delay between sends (seconds)</label>
+        <input type="number" id="delaySeconds" min="0" step="1">
+      </div>
+
+      <div class="field">
+        <label for="msgLimit">Message limit per worker, per run (empty = unlimited)</label>
+        <input type="number" id="msgLimit" min="1" step="1" placeholder="e.g. 200">
+        <div class="hint">Safety cap so one WhatsApp number doesn't send too much and get blocked.</div>
+      </div>
+    </fieldset>
+
+    <button type="submit" class="save-btn" id="saveBtn" disabled>Save Settings</button>
+    <div class="status-msg" id="statusMsg"></div>
+  </form>
+</div>
+
+<script>
+  const API_BASE = window.MO_API_BASE || window.location.origin;
+  const keyInput = document.getElementById("workerKey");
+  const loadBtn = document.getElementById("loadBtn");
+  const fields = document.getElementById("fields");
+  const throttleFields = document.getElementById("throttleFields");
+  const saveBtn = document.getElementById("saveBtn");
+  const statusMsg = document.getElementById("statusMsg");
+  const form = document.getElementById("settingsForm");
+
+  const messageTemplate = document.getElementById("messageTemplate");
+  const messageImage = document.getElementById("messageImage");
+  const sendImage = document.getElementById("sendImage");
+  const delaySeconds = document.getElementById("delaySeconds");
+  const msgLimit = document.getElementById("msgLimit");
+
+  const storedKey = localStorage.getItem("mo_worker_key");
+  if (storedKey) keyInput.value = storedKey;
+
+  function setStatus(text, isError) {
+    statusMsg.textContent = text;
+    statusMsg.className = "status-msg" + (isError ? " error" : text ? " success" : "");
+  }
+
+  async function loadSettings() {
+    const key = keyInput.value.trim();
+    if (!key) {
+      setStatus("Enter the worker key first.", true);
+      return;
+    }
+    localStorage.setItem("mo_worker_key", key);
+    setStatus("Loading...", false);
+
+    try {
+      const res = await fetch(`${API_BASE}/api/settings`, {
+        headers: { "X-Worker-Key": key },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to load settings - check the key.");
+
+      messageTemplate.value = data.message_template || "";
+      messageImage.value = data.message_image || "";
+      sendImage.checked = !!data.send_image;
+      delaySeconds.value = data.message_delay_seconds ?? 5;
+      msgLimit.value = data.msg_limit ?? "";
+
+      fields.disabled = false;
+      throttleFields.disabled = false;
+      saveBtn.disabled = false;
+      setStatus("Loaded current settings.", false);
+    } catch (err) {
+      setStatus(err.message, true);
+    }
+  }
+
+  loadBtn.addEventListener("click", loadSettings);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const key = keyInput.value.trim();
+
+    saveBtn.disabled = true;
+    setStatus("Saving...", false);
+
+    const payload = {
+      message_template: messageTemplate.value,
+      message_image: messageImage.value.trim() || null,
+      send_image: sendImage.checked,
+      message_delay_seconds: Number(delaySeconds.value),
+      msg_limit: msgLimit.value.trim() === "" ? null : Number(msgLimit.value),
+    };
+
+    try {
+      const res = await fetch(`${API_BASE}/api/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Worker-Key": key },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Save failed.");
+
+      setStatus("Saved - workers will pick this up on their next loop.", false);
+    } catch (err) {
+      setStatus(err.message, true);
+    } finally {
+      saveBtn.disabled = false;
+    }
+  });
+
+  if (storedKey) loadSettings();
+</script>
+</body>
+</html>
