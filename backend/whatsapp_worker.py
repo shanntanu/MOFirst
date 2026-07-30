@@ -469,6 +469,14 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     open_chat(driver, phone_10digit, country_code)
     wait = WebDriverWait(driver, 30)
 
+    # A real recorded manual flow clicks into the message box itself before
+    # ever touching the attach button - our code was skipping straight from
+    # "chat opened" to "click attach", never actually focusing the compose
+    # area first. Matching the recorded flow exactly here.
+    send_box = wait.until(EC.presence_of_element_located((By.XPATH, SEND_BOX_XPATH)))
+    send_box.click()
+    time.sleep(0.3)
+
     _click_attach_button(driver, wait)
     time.sleep(0.5)
     _click_photos_videos(driver, wait)
@@ -478,22 +486,47 @@ def send_image_with_caption(driver, phone_10digit, caption, image_path, country_
     # only synchronization available for it opening and gaining focus.
     _select_file_in_native_dialog(image_path)
 
-    caption_box = wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
-    caption_box.click()
-    time.sleep(0.5)
+    # Give WhatsApp a moment to finish rendering the image preview and wiring
+    # up the caption box's own paste handling before we touch it - pasting
+    # immediately after it merely appears in the DOM (present != actually
+    # ready) is what silently swallowed the paste before, with nothing to
+    # show for it and nothing raised.
+    wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
+    time.sleep(1.5)
 
-    with _ClipboardLock():
-        _copy_text_to_clipboard(caption)
-        caption_box.send_keys(Keys.CONTROL, "v")
-        time.sleep(0.5)
-
-    if not (caption_box.get_attribute("textContent") or "").strip():
-        raise RuntimeError(
-            "caption box was still empty after pasting - the text paste didn't register"
-        )
+    caption_box = _paste_caption_with_retry(driver, wait, caption)
 
     caption_box.send_keys(Keys.ENTER)
     time.sleep(3)  # image uploads can take longer than a plain text send
+
+
+def _paste_caption_with_retry(driver, wait, caption, attempts=4):
+    """Clicks the caption box and pastes, re-locating and re-clicking fresh
+    on every attempt (not reusing one cached element) and checking the
+    result each time - a single click+paste attempt was proving unreliable
+    right after the image preview appears, failing silently with no
+    exception and nothing visibly pasted."""
+    last_seen = ""
+    for attempt in range(1, attempts + 1):
+        caption_box = wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
+        caption_box.click()
+        time.sleep(0.4)
+
+        with _ClipboardLock():
+            _copy_text_to_clipboard(caption)
+            caption_box.send_keys(Keys.CONTROL, "v")
+            time.sleep(0.6)
+
+        last_seen = (caption_box.get_attribute("textContent") or "").strip()
+        if last_seen:
+            return caption_box
+
+        time.sleep(0.8 * attempt)  # back off a bit more each retry
+
+    raise RuntimeError(
+        f"caption box was still empty after {attempts} paste attempts "
+        f"(last seen content: {last_seen!r}) - the text paste didn't register"
+    )
 
 
 def _is_driver_alive(driver):
