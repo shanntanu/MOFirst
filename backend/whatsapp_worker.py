@@ -32,36 +32,47 @@ hidden <input type=file>'s native .click(), which opens a REAL Windows
 file-picker dialog. Selenium cannot interact with native OS dialogs at all -
 they live outside the browser process - so that path hangs indefinitely.
 
-So sending never touches the attach menu, any file input, or a caption/send
-button selector:
-  1. Copy BOTH the image (CF_DIB) and the caption text (CF_UNICODETEXT) onto
-     the Windows clipboard TOGETHER, in one Open/Empty/Close session, before
-     the chat is even open. Windows lets the clipboard hold multiple formats
-     at once - setting them separately (image now, text moments later) was an
-     earlier bug: the second EmptyClipboard() call could race with Chrome
-     still processing the first paste and silently corrupt/drop the text.
+So sending never touches the attach menu or any file input:
+  1. Copy ONLY the image (CF_DIB) onto the Windows clipboard.
   2. Open the chat.
-  3. Click the chat's message box and press Ctrl+V - the message box reads
-     the image portion of the clipboard, WhatsApp opens its own image-preview
-     screen with a caption box, and moves keyboard focus into that caption
-     box automatically.
-  4. Paste again (Ctrl+V) directly onto whatever currently has focus - no
-     click needed. That caption box only accepts text, so this second paste
-     reads the text portion of the SAME clipboard content set in step 1.
+  3. Click the chat's message box and press Ctrl+V - WhatsApp opens its own
+     image-preview screen with a caption box.
+  4. Explicitly locate and click that caption box (see CAPTION_XPATH) - do
+     NOT assume driver.switch_to.active_element is it. That was tried and
+     failed: it's a guess about focus, not a verified one.
+  5. Overwrite the clipboard with ONLY the caption text (CF_UNICODETEXT), now
+     that the image paste has fully landed, then paste (Ctrl+V) into the
+     caption box.
+
+     Two things that look like reasonable shortcuts but are NOT, both
+     verified against real failures on this exact flow:
+       - Putting BOTH the image and the text on the clipboard together (in
+         one session, so a single paste could serve either target) sounds
+         appealing, but WhatsApp's paste handler checks "does the clipboard
+         contain an image?" first and unconditionally treats ANY paste as an
+         image paste when it does - so the second Ctrl+V re-pasted the image
+         instead of ever reading the text. Each format must be on the
+         clipboard alone at the moment its paste happens.
+       - Overwriting the clipboard with text using a fresh Open/Empty/Close
+         cycle immediately after the image paste, without confirming the
+         caption box actually exists and has real focus first, silently
+         drops the text - the paste event has nowhere real to land.
+
      Pasting (rather than send_keys) is also what makes the emoji-heavy,
      multi-line message text work at all: ChromeDriver's send_keys rejects
      characters outside the Basic Multilingual Plane (the message contains
      U+1F389, U+1F4BB, U+1F5D3), and a raw newline sent via send_keys fires
      Enter, which sends prematurely. A pasted newline is just a line break.
-  5. Press Enter to send.
+  6. Press Enter to send.
 
 send_image (in config.json) controls whether this runs at all - false, or no
 message_image configured, sends text-only instead.
 
 The OS clipboard is one machine-wide resource. If more than one worker runs
 on this machine, two of them pasting at the same moment could hand the wrong
-image/text to the wrong chat - _ClipboardLock() serializes the whole
-copy-paste-copy-paste sequence across worker processes so that can't happen.
+image/text to the wrong chat - _ClipboardLock() holds for the ENTIRE
+copy-image -> paste-image -> copy-text -> paste-text sequence across worker
+processes so that can't happen.
 
 WhatsApp Web's DOM changes periodically. If sending breaks after a WhatsApp
 update, the selectors below are the first thing to re-check against the live
@@ -88,6 +99,16 @@ from config import get_config
 WHATSAPP_WEB_URL = "https://web.whatsapp.com"
 SEND_BOX_XPATH = "//footer//div[@contenteditable='true']"
 QR_CODE_SELECTOR = "canvas[aria-label='Scan this QR code to link a device!'], div[data-testid='qrcode']"
+# Deliberately narrow - a broader fallback like //div[@contenteditable='true']
+# risks matching some unrelated editable element elsewhere on the page (e.g.
+# the search box), which then silently swallows the caption paste while the
+# real preview dialog sits there looking untouched.
+CAPTION_XPATH = (
+    "//div[@contenteditable='true'][@aria-placeholder='Add a caption']"
+    " | //div[@contenteditable='true'][@aria-label='Add a caption']"
+    " | //div[@aria-placeholder='Add a caption']"
+    " | //div[@aria-label='Add a caption']"
+)
 
 
 # ---- Remote queue client (talks to api/index.py on Vercel) ----
@@ -240,18 +261,14 @@ def _open_clipboard_with_retry():
     raise RuntimeError(f"could not open the Windows clipboard after retries: {last_error}")
 
 
-def _copy_image_and_text_to_clipboard(image_path, text):
-    """Puts BOTH the image (CF_DIB) and the caption text (CF_UNICODETEXT) on
-    the clipboard in a single Open/Empty/Close session.
+def _copy_image_to_clipboard(image_path):
+    """Puts ONLY the image on the Windows clipboard as CF_DIB.
 
-    Windows lets the clipboard hold multiple formats at once, and each paste
-    target then reads whichever format it actually accepts: the chat's
-    message box (which prefers images when both are offered) picks up the
-    image, and the text-only caption box that WhatsApp opens afterwards picks
-    up the text. Setting them in two SEPARATE sessions (image now, text
-    later) was the actual bug - by the time the second EmptyClipboard() ran,
-    Chrome could still be mid-read from the image paste, and re-emptying the
-    clipboard out from under it corrupted or dropped the text write entirely.
+    Deliberately image-only, not combined with the text in one clipboard
+    session - WhatsApp's paste handler treats ANY paste as an image paste
+    whenever the clipboard contains image data, no matter which field is
+    focused, so having both formats present at once made a text paste
+    re-attach the image instead of ever reading the text.
 
     CF_DIB has no alpha channel, so a transparent PNG is flattened onto white
     first - otherwise transparent regions come out black.
@@ -275,48 +292,72 @@ def _copy_image_and_text_to_clipboard(image_path, text):
     try:
         win32clipboard.EmptyClipboard()
         win32clipboard.SetClipboardData(win32clipboard.CF_DIB, dib)
+    finally:
+        win32clipboard.CloseClipboard()
+
+
+def _copy_text_to_clipboard(text):
+    """Puts ONLY the caption text on the Windows clipboard as CF_UNICODETEXT.
+
+    Must only be called once the image paste has actually landed and the
+    caption box is confirmed present+focused (see send_image_with_caption) -
+    calling this too early, before there's a real text target for the paste
+    to land in, is what silently dropped the caption in an earlier version.
+    """
+    import win32clipboard
+
+    _open_clipboard_with_retry()
+    try:
+        win32clipboard.EmptyClipboard()
         win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
     finally:
         win32clipboard.CloseClipboard()
 
 
 def send_image_with_caption(driver, phone_10digit, caption, image_path, country_code):
-    """No element-hunting for a caption box or send button: copy image+text
-    onto the clipboard together -> open chat -> paste image (Ctrl+V) -> paste
-    text (Ctrl+V) -> Enter. WhatsApp moves keyboard focus onto its own
-    caption field the moment the image paste lands, so the second paste and
-    the Enter just go to whatever currently has focus."""
+    """Copy image -> open chat -> paste image (Ctrl+V) -> explicitly locate
+    and click the real caption box -> copy text -> paste text (Ctrl+V) ->
+    Enter. The image and text are never on the clipboard at the same time
+    (WhatsApp treats any paste as an image paste whenever the clipboard has
+    image data, regardless of focus), and the caption box is located and
+    clicked explicitly rather than assumed via active_element."""
     if not Path(image_path).is_file():
         raise FileNotFoundError(f"message_image not found on disk: {image_path}")
 
+    open_chat(driver, phone_10digit, country_code)
+    wait = WebDriverWait(driver, 30)
+
     with _ClipboardLock():
-        # 1-2. Both formats go on the clipboard together, before the chat is
-        # even open, so there's no second clipboard write later to race with
-        # Chrome still processing the first paste.
-        _copy_image_and_text_to_clipboard(image_path, caption)
+        # 1. Image only on the clipboard.
+        _copy_image_to_clipboard(image_path)
 
-        # 3. Open the chat.
-        open_chat(driver, phone_10digit, country_code)
-        wait = WebDriverWait(driver, 30)
-
-        # 4. Click the chat box, paste - the message box reads the image
-        # portion of the clipboard.
+        # 2. Click the chat box, paste - opens the image preview screen.
         send_box = wait.until(EC.presence_of_element_located((By.XPATH, SEND_BOX_XPATH)))
         send_box.click()
         time.sleep(0.3)
         send_box.send_keys(Keys.CONTROL, "v")
-        time.sleep(1.5)  # let the image preview screen finish opening
 
-        # 5-6. Paste again directly onto whatever currently has focus - no
-        # click, since WhatsApp has already moved focus into its own caption
-        # field. That field is text-only, so this paste reads the text
-        # portion of the same clipboard content.
-        active = driver.switch_to.active_element
-        active.send_keys(Keys.CONTROL, "v")
+        # 3. Wait for and click the actual caption box - confirms the image
+        # paste really landed and gives the text paste a real, verified
+        # target instead of guessing at whatever has focus.
+        caption_box = wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
+        caption_box.click()
         time.sleep(0.5)
 
-    # 7. Send.
-    active.send_keys(Keys.ENTER)
+        # 4. Only now does the text go on the clipboard, replacing the image -
+        # the caption box is confirmed present and clicked, so this paste has
+        # somewhere real to land.
+        _copy_text_to_clipboard(caption)
+        caption_box.send_keys(Keys.CONTROL, "v")
+        time.sleep(0.5)
+
+        if not (caption_box.get_attribute("textContent") or "").strip():
+            raise RuntimeError(
+                "caption box was still empty after pasting - the text paste didn't register"
+            )
+
+    # 5. Send.
+    caption_box.send_keys(Keys.ENTER)
     time.sleep(3)  # image uploads can take longer than a plain text send
 
 
