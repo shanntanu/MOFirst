@@ -78,7 +78,9 @@
       "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python audit_probe2.py)",
       "Bash(PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python audit_probe3.py)",
       "Bash(python -m py_compile backend/whatsapp_worker.py api/index.py api/db.py api/config.py backend/config.py)",
-      "Bash(python -c \"import json; json.load\\(open\\('vercel.json'\\)\\); json.load\\(open\\('backend/config.json', encoding='utf-8'\\)\\); print\\('configs valid JSON'\\)\")"
+      "Bash(python -c \"import json; json.load\\(open\\('vercel.json'\\)\\); json.load\\(open\\('backend/config.json', encoding='utf-8'\\)\\); print\\('configs valid JSON'\\)\")",
+      "Bash(python -m py_compile backend/whatsapp_worker.py backend/config.py)",
+      "Bash(python \"C:\\\\Users\\\\SHANTA~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-shantanuwagh-Desktop-Claude-MO\\\\0ddc2db6-b8f2-4db5-aea1-2d1eff3807e1\\\\scratchpad\\\\test_text_clip.py\")"
     ]
   }
 }

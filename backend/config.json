@@ -4,6 +4,7 @@
   "message_delay_seconds": 5,
   "message_template": "Hi {first_name}, \n\nThanks for scanning our QR code! 🎉 \n\nJoin our FREE Stock Market Webinar Series and learn Trading and Investment insights from the industry experts.\n\n🗓️ *Weekly 21 live expert webinars.* \n💻 Click below to join on Zoom https://zoom.us/webinar/register/WN_g5mw9hDPRfe_SNbf_SktKw#/registration\n\nClick here to open demat account in a few minutes: https://ekyc.motilaloswal.com/open-demat-account",
   "message_image": "../public/message.png",
+  "send_image": true,
   "country_code": "91",
   "chrome_profile_root": "./whatsapp_profiles",
   "headless": false
