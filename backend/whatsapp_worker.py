@@ -33,22 +33,27 @@ file-picker dialog. Selenium cannot interact with native OS dialogs at all -
 they live outside the browser process - so that path hangs indefinitely.
 
 So sending never touches the attach menu, any file input, or a caption/send
-button selector. It's exactly six steps:
-  1. Copy the image onto the Windows clipboard (as CF_DIB).
+button selector:
+  1. Copy BOTH the image (CF_DIB) and the caption text (CF_UNICODETEXT) onto
+     the Windows clipboard TOGETHER, in one Open/Empty/Close session, before
+     the chat is even open. Windows lets the clipboard hold multiple formats
+     at once - setting them separately (image now, text moments later) was an
+     earlier bug: the second EmptyClipboard() call could race with Chrome
+     still processing the first paste and silently corrupt/drop the text.
   2. Open the chat.
-  3. Click the chat's message box and press Ctrl+V - WhatsApp treats this
-     exactly like a user pasting an image, and opens its own image-preview
-     screen with a caption box, no dialog involved, and moves keyboard focus
-     into that caption box automatically.
-  4. Copy the caption text onto the clipboard (as CF_UNICODETEXT).
-  5. Paste directly (Ctrl+V) - no click needed, focus is already on the
-     caption box from step 3. Pasting (rather than send_keys) is also what
-     makes the emoji-heavy, multi-line message text work at all: ChromeDriver's
-     send_keys rejects characters outside the Basic Multilingual Plane (the
-     message contains U+1F389, U+1F4BB, U+1F5D3), and a raw newline sent via
-     send_keys fires Enter, which sends prematurely. A pasted newline is just
-     a line break, not a keypress.
-  6. Press Enter to send.
+  3. Click the chat's message box and press Ctrl+V - the message box reads
+     the image portion of the clipboard, WhatsApp opens its own image-preview
+     screen with a caption box, and moves keyboard focus into that caption
+     box automatically.
+  4. Paste again (Ctrl+V) directly onto whatever currently has focus - no
+     click needed. That caption box only accepts text, so this second paste
+     reads the text portion of the SAME clipboard content set in step 1.
+     Pasting (rather than send_keys) is also what makes the emoji-heavy,
+     multi-line message text work at all: ChromeDriver's send_keys rejects
+     characters outside the Basic Multilingual Plane (the message contains
+     U+1F389, U+1F4BB, U+1F5D3), and a raw newline sent via send_keys fires
+     Enter, which sends prematurely. A pasted newline is just a line break.
+  5. Press Enter to send.
 
 send_image (in config.json) controls whether this runs at all - false, or no
 message_image configured, sends text-only instead.
@@ -235,8 +240,18 @@ def _open_clipboard_with_retry():
     raise RuntimeError(f"could not open the Windows clipboard after retries: {last_error}")
 
 
-def _copy_image_to_clipboard(image_path):
-    """Puts the image on the Windows clipboard as CF_DIB.
+def _copy_image_and_text_to_clipboard(image_path, text):
+    """Puts BOTH the image (CF_DIB) and the caption text (CF_UNICODETEXT) on
+    the clipboard in a single Open/Empty/Close session.
+
+    Windows lets the clipboard hold multiple formats at once, and each paste
+    target then reads whichever format it actually accepts: the chat's
+    message box (which prefers images when both are offered) picks up the
+    image, and the text-only caption box that WhatsApp opens afterwards picks
+    up the text. Setting them in two SEPARATE sessions (image now, text
+    later) was the actual bug - by the time the second EmptyClipboard() ran,
+    Chrome could still be mid-read from the image paste, and re-emptying the
+    clipboard out from under it corrupted or dropped the text write entirely.
 
     CF_DIB has no alpha channel, so a transparent PNG is flattened onto white
     first - otherwise transparent regions come out black.
@@ -260,56 +275,47 @@ def _copy_image_to_clipboard(image_path):
     try:
         win32clipboard.EmptyClipboard()
         win32clipboard.SetClipboardData(win32clipboard.CF_DIB, dib)
-    finally:
-        win32clipboard.CloseClipboard()
-
-
-def _copy_text_to_clipboard(text):
-    """Puts plain text on the Windows clipboard as CF_UNICODETEXT.
-
-    Pasting (rather than send_keys) is what makes emoji and multi-line text
-    work: send_keys rejects non-BMP characters outright, and a raw newline
-    sent as a keystroke fires Enter (which sends) instead of a line break.
-    """
-    import win32clipboard
-
-    _open_clipboard_with_retry()
-    try:
-        win32clipboard.EmptyClipboard()
         win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
     finally:
         win32clipboard.CloseClipboard()
 
 
 def send_image_with_caption(driver, phone_10digit, caption, image_path, country_code):
-    """Exactly six steps, no element-hunting for a caption box or send
-    button: copy image -> open chat -> paste image (Ctrl+V) -> copy text ->
-    paste text (Ctrl+V) -> Enter. WhatsApp moves keyboard focus onto its own
+    """No element-hunting for a caption box or send button: copy image+text
+    onto the clipboard together -> open chat -> paste image (Ctrl+V) -> paste
+    text (Ctrl+V) -> Enter. WhatsApp moves keyboard focus onto its own
     caption field the moment the image paste lands, so the second paste and
     the Enter just go to whatever currently has focus."""
     if not Path(image_path).is_file():
         raise FileNotFoundError(f"message_image not found on disk: {image_path}")
 
-    open_chat(driver, phone_10digit, country_code)
-    wait = WebDriverWait(driver, 30)
-
     with _ClipboardLock():
-        # 1-3. Copy the image, click the chat, paste it in.
-        _copy_image_to_clipboard(image_path)
+        # 1-2. Both formats go on the clipboard together, before the chat is
+        # even open, so there's no second clipboard write later to race with
+        # Chrome still processing the first paste.
+        _copy_image_and_text_to_clipboard(image_path, caption)
+
+        # 3. Open the chat.
+        open_chat(driver, phone_10digit, country_code)
+        wait = WebDriverWait(driver, 30)
+
+        # 4. Click the chat box, paste - the message box reads the image
+        # portion of the clipboard.
         send_box = wait.until(EC.presence_of_element_located((By.XPATH, SEND_BOX_XPATH)))
         send_box.click()
         time.sleep(0.3)
         send_box.send_keys(Keys.CONTROL, "v")
         time.sleep(1.5)  # let the image preview screen finish opening
 
-        # 4-5. Copy the caption text, paste it directly - no click, WhatsApp
-        # has already moved focus to its own caption field.
-        _copy_text_to_clipboard(caption)
+        # 5-6. Paste again directly onto whatever currently has focus - no
+        # click, since WhatsApp has already moved focus into its own caption
+        # field. That field is text-only, so this paste reads the text
+        # portion of the same clipboard content.
         active = driver.switch_to.active_element
         active.send_keys(Keys.CONTROL, "v")
         time.sleep(0.5)
 
-    # 6. Send.
+    # 7. Send.
     active.send_keys(Keys.ENTER)
     time.sleep(3)  # image uploads can take longer than a plain text send
 
