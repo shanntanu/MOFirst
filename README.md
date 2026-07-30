@@ -88,6 +88,7 @@ Edit `backend/config.json`:
   "message_delay_seconds": 5,
   "message_template": "Hi {first_name}, ...",
   "message_image": "../public/message.png",
+  "msg_limit": 200,
   "country_code": "91"
 }
 ```
@@ -100,8 +101,15 @@ Edit `backend/config.json`:
   full name), `{full_name}`, and `{contact_number}` placeholders.
 - `message_image`: path (relative to `backend/`) to an image sent alongside
   the message as a caption. Set to `null` to send text-only messages instead.
+- `msg_limit`: caps how many messages **this one worker/number** will send
+  **per run**, as a safety net against WhatsApp flagging/blocking a number
+  for sending too much. Once reached, the worker prints a message and stops
+  itself (it does not crash or lose the queue - pending leads just stay
+  queued). Set to `null` for no limit. Restart the worker (after raising
+  `msg_limit` if needed) to resume sending once you're ready for more.
 - The worker re-reads `config.json` before each send, so you can tune the
-  delay/template/image live without restarting it.
+  delay/template/image/limit live - though `msg_limit` itself only takes
+  effect from the next restart, since the sent-count resets to 0 each run.
 
 Install deps and run one worker per WhatsApp number, each with its own
 `SYSTEM_ID` (must match `NUM_SYSTEMS` on Vercel - i.e. values `0` through

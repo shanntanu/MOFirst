@@ -10,6 +10,7 @@ _DEFAULTS = {
     "message_template": "Hi {first_name}, thank you for registering with Motilal Oswal!",
     "message_image": None,
     "send_image": True,
+    "msg_limit": None,  # None = unlimited
     "country_code": "91",
     "chrome_profile_root": "./whatsapp_profiles",
     "headless": False,

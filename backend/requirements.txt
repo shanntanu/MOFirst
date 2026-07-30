@@ -1,7 +1,8 @@
 selenium==4.23.1
 requests==2.32.3
-# Only needed for the clipboard-paste fallback in whatsapp_worker.py (Windows).
-# The primary CDP path works without these, but install them so the fallback
-# is available if WhatsApp changes its file inputs.
+# pywin32: Windows clipboard access for pasting the caption text.
+# pyautogui: types the image path into the native Windows file-picker dialog
+#            that WhatsApp's "Photos & videos" attach-menu item opens -
+#            Selenium cannot interact with native OS dialogs at all.
 pywin32==306; sys_platform == 'win32'
-Pillow==10.4.0
+pyautogui==0.9.54

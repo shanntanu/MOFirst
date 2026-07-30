@@ -25,59 +25,56 @@ It is unofficial automation of a personal WhatsApp account - respect WhatsApp's
 terms of use and your own organization's policies before running this at volume.
 
 
-HOW IMAGE SENDING WORKS - pure clipboard paste, no attach menu, no clicks
+HOW IMAGE SENDING WORKS - attach menu + native dialog, driven by pyautogui
 --------------------------------------------------------------------------
-Clicking WhatsApp's attach menu ("Photos & videos") makes WhatsApp call the
-hidden <input type=file>'s native .click(), which opens a REAL Windows
-file-picker dialog. Selenium cannot interact with native OS dialogs at all -
-they live outside the browser process - so that path hangs indefinitely.
+This matches a real recorded click flow (Selenium IDE, captured against a
+live logged-in WhatsApp Web session): click the attach button, then click
+"Photos & videos" (the 2nd item in that menu). The recording stops exactly
+there because clicking that item makes WhatsApp call the hidden
+<input type=file>'s native .click(), which opens a REAL Windows file-picker
+dialog - and native OS dialogs exist outside the browser process entirely,
+so Selenium cannot see or record anything that happens inside one.
 
-So sending never touches the attach menu or any file input:
-  1. Copy ONLY the image (CF_DIB) onto the Windows clipboard.
-  2. Open the chat.
-  3. Click the chat's message box and press Ctrl+V - WhatsApp opens its own
-     image-preview screen with a caption box.
-  4. Explicitly locate and click that caption box (see CAPTION_XPATH) - do
-     NOT assume driver.switch_to.active_element is it. That was tried and
-     failed: it's a guess about focus, not a verified one.
-  5. Overwrite the clipboard with ONLY the caption text (CF_UNICODETEXT), now
-     that the image paste has fully landed, then paste (Ctrl+V) into the
-     caption box.
-
-     Two things that look like reasonable shortcuts but are NOT, both
-     verified against real failures on this exact flow:
-       - Putting BOTH the image and the text on the clipboard together (in
-         one session, so a single paste could serve either target) sounds
-         appealing, but WhatsApp's paste handler checks "does the clipboard
-         contain an image?" first and unconditionally treats ANY paste as an
-         image paste when it does - so the second Ctrl+V re-pasted the image
-         instead of ever reading the text. Each format must be on the
-         clipboard alone at the moment its paste happens.
-       - Overwriting the clipboard with text using a fresh Open/Empty/Close
-         cycle immediately after the image paste, without confirming the
-         caption box actually exists and has real focus first, silently
-         drops the text - the paste event has nowhere real to land.
-
-     Pasting (rather than send_keys) is also what makes the emoji-heavy,
-     multi-line message text work at all: ChromeDriver's send_keys rejects
-     characters outside the Basic Multilingual Plane (the message contains
-     U+1F389, U+1F4BB, U+1F5D3), and a raw newline sent via send_keys fires
-     Enter, which sends prematurely. A pasted newline is just a line break.
+The missing piece is pyautogui: unlike Selenium, it sends real OS-level
+keystrokes, which a native dialog receives normally since it auto-focuses
+its filename box the instant it opens. So the flow is:
+  1. Open the chat (existing URL-based open_chat - the recorded flow instead
+     clicked a specific chat already in the sidebar, which only works for
+     whatever contact was open during recording, not for messaging arbitrary
+     new numbers from the queue).
+  2. Click the attach button, then click "Photos & videos".
+  3. A native Windows "Open" dialog appears. pyautogui types the absolute
+     image path (from message_image in config.json) and presses Enter - this
+     selects that exact file and closes the dialog, exactly as if you had
+     typed it into the filename box yourself.
+  4. WhatsApp opens its own image-preview screen with a caption box.
+  5. Copy the caption text onto the clipboard (CF_UNICODETEXT) and paste
+     (Ctrl+V) into that caption box - so the image and the message text go
+     out as ONE message, with the text as the image's caption. Pasting
+     (rather than send_keys) is what makes the emoji-heavy, multi-line
+     message text work at all: ChromeDriver's send_keys rejects characters
+     outside the Basic Multilingual Plane (the message contains U+1F389,
+     U+1F4BB, U+1F5D3), and a raw newline sent via send_keys fires Enter,
+     which sends prematurely. A pasted newline is just a line break.
   6. Press Enter to send.
 
 send_image (in config.json) controls whether this runs at all - false, or no
 message_image configured, sends text-only instead.
 
-The OS clipboard is one machine-wide resource. If more than one worker runs
-on this machine, two of them pasting at the same moment could hand the wrong
-image/text to the wrong chat - _ClipboardLock() holds for the ENTIRE
-copy-image -> paste-image -> copy-text -> paste-text sequence across worker
-processes so that can't happen.
+pyautogui controls the physical keyboard, and native dialogs need real OS
+focus - so this machine's screen/keyboard must be free while a worker is
+mid-send (don't use the mouse/keyboard for something else at that instant),
+and running more than one worker on one machine means their native-dialog
+steps could collide if they land at the exact same moment. _ClipboardLock()
+still serializes the clipboard portion (the caption paste) across workers.
 
-WhatsApp Web's DOM changes periodically. If sending breaks after a WhatsApp
-update, the selectors below are the first thing to re-check against the live
-page (right-click element -> Inspect), and every failure drops a screenshot
-in backend/debug_screenshots/ showing exactly what was on screen.
+WhatsApp Web's DOM changes periodically, and the CSS selectors below came
+from one specific recording session - Meta's build tooling generates these
+class names per-build, so they can and do change on WhatsApp updates. If
+sending breaks, right-click the attach button / "Photos & videos" item in a
+live session -> Inspect -> compare against ATTACH_BUTTON_SELECTOR /
+PHOTOS_VIDEOS_SELECTOR below. Every failure also drops a screenshot in
+backend/debug_screenshots/ showing exactly what was on screen.
 """
 
 import os
@@ -109,6 +106,20 @@ CAPTION_XPATH = (
     " | //div[@aria-placeholder='Add a caption']"
     " | //div[@aria-label='Add a caption']"
 )
+# From a Selenium IDE recording against a live session, combined with the
+# semantic aria-label/title guesses used before that recording existed - the
+# recorded selector is tried first since it reflects the actual current
+# WhatsApp Web build.
+ATTACH_BUTTON_SELECTOR = (
+    ".x100vrsf .html-span .xxk0z11, "
+    "span[data-icon='attach-menu-plus'], span[data-icon='clip'], "
+    "div[title='Attach'], button[aria-label='Attach']"
+)
+# ".html-button:nth-child(2)" is positional - "Photos & videos" is the 2nd
+# item in the attach menu (Document, Photos & videos, Camera, ...). Falls
+# back to matching the item's exact visible text if the position ever shifts.
+PHOTOS_VIDEOS_SELECTOR = ".html-button:nth-child(2) .x140p0ai"
+PHOTOS_VIDEOS_TEXT_XPATH = "//span[normalize-space()='Photos & videos']"
 
 
 # ---- Remote queue client (talks to api/index.py on Vercel) ----
@@ -261,41 +272,6 @@ def _open_clipboard_with_retry():
     raise RuntimeError(f"could not open the Windows clipboard after retries: {last_error}")
 
 
-def _copy_image_to_clipboard(image_path):
-    """Puts ONLY the image on the Windows clipboard as CF_DIB.
-
-    Deliberately image-only, not combined with the text in one clipboard
-    session - WhatsApp's paste handler treats ANY paste as an image paste
-    whenever the clipboard contains image data, no matter which field is
-    focused, so having both formats present at once made a text paste
-    re-attach the image instead of ever reading the text.
-
-    CF_DIB has no alpha channel, so a transparent PNG is flattened onto white
-    first - otherwise transparent regions come out black.
-    """
-    import io
-
-    import win32clipboard
-    from PIL import Image
-
-    with Image.open(image_path) as src:
-        rgba = src.convert("RGBA")
-        flattened = Image.new("RGB", rgba.size, (255, 255, 255))
-        flattened.paste(rgba, mask=rgba.split()[3])
-
-        buf = io.BytesIO()
-        flattened.save(buf, "BMP")
-        # A BMP file starts with a 14-byte BITMAPFILEHEADER that CF_DIB omits.
-        dib = buf.getvalue()[14:]
-
-    _open_clipboard_with_retry()
-    try:
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardData(win32clipboard.CF_DIB, dib)
-    finally:
-        win32clipboard.CloseClipboard()
-
-
 def _copy_text_to_clipboard(text):
     """Puts ONLY the caption text on the Windows clipboard as CF_UNICODETEXT.
 
@@ -314,49 +290,74 @@ def _copy_text_to_clipboard(text):
         win32clipboard.CloseClipboard()
 
 
+def _click_attach_button(driver, wait):
+    btn = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ATTACH_BUTTON_SELECTOR)))
+    btn.click()
+
+
+def _click_photos_videos(driver, wait):
+    try:
+        item = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, PHOTOS_VIDEOS_SELECTOR)))
+    except Exception:
+        # Position-based selector didn't match (menu order changed) - fall
+        # back to the item's exact visible text.
+        item = wait.until(EC.element_to_be_clickable((By.XPATH, PHOTOS_VIDEOS_TEXT_XPATH)))
+    item.click()
+
+
+def _select_file_in_native_dialog(image_path, wait_seconds=2.0):
+    """Feeds the image path into the real Windows "Open" file-picker dialog
+    that WhatsApp's "Photos & videos" click triggers.
+
+    Selenium cannot see or interact with this dialog at all - it's a native
+    OS window, not a browser tab/frame. pyautogui instead sends real
+    OS-level keystrokes, which the dialog receives normally because it
+    auto-focuses its filename box the moment it opens. Typing the full path
+    and pressing Enter is equivalent to browsing to and picking that file.
+    """
+    import pyautogui
+
+    time.sleep(wait_seconds)  # let the native dialog finish opening/focusing
+    pyautogui.write(image_path, interval=0.01)
+    time.sleep(0.3)
+    pyautogui.press("enter")
+
+
 def send_image_with_caption(driver, phone_10digit, caption, image_path, country_code):
-    """Copy image -> open chat -> paste image (Ctrl+V) -> explicitly locate
-    and click the real caption box -> copy text -> paste text (Ctrl+V) ->
-    Enter. The image and text are never on the clipboard at the same time
-    (WhatsApp treats any paste as an image paste whenever the clipboard has
-    image data, regardless of focus), and the caption box is located and
-    clicked explicitly rather than assumed via active_element."""
+    """Open chat -> click attach -> click "Photos & videos" -> a native
+    Windows file dialog opens, which pyautogui fills in (Selenium cannot
+    touch it) -> WhatsApp's image-preview screen appears with a caption box
+    -> paste the caption text into it, so image and text go out as one
+    message -> Enter to send."""
     if not Path(image_path).is_file():
         raise FileNotFoundError(f"message_image not found on disk: {image_path}")
 
     open_chat(driver, phone_10digit, country_code)
     wait = WebDriverWait(driver, 30)
 
+    _click_attach_button(driver, wait)
+    time.sleep(0.5)
+    _click_photos_videos(driver, wait)
+
+    # The native dialog is not part of the DOM, so there's nothing Selenium
+    # can wait on here - _select_file_in_native_dialog's own sleep is the
+    # only synchronization available for it opening and gaining focus.
+    _select_file_in_native_dialog(image_path)
+
+    caption_box = wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
+    caption_box.click()
+    time.sleep(0.5)
+
     with _ClipboardLock():
-        # 1. Image only on the clipboard.
-        _copy_image_to_clipboard(image_path)
-
-        # 2. Click the chat box, paste - opens the image preview screen.
-        send_box = wait.until(EC.presence_of_element_located((By.XPATH, SEND_BOX_XPATH)))
-        send_box.click()
-        time.sleep(0.3)
-        send_box.send_keys(Keys.CONTROL, "v")
-
-        # 3. Wait for and click the actual caption box - confirms the image
-        # paste really landed and gives the text paste a real, verified
-        # target instead of guessing at whatever has focus.
-        caption_box = wait.until(EC.presence_of_element_located((By.XPATH, CAPTION_XPATH)))
-        caption_box.click()
-        time.sleep(0.5)
-
-        # 4. Only now does the text go on the clipboard, replacing the image -
-        # the caption box is confirmed present and clicked, so this paste has
-        # somewhere real to land.
         _copy_text_to_clipboard(caption)
         caption_box.send_keys(Keys.CONTROL, "v")
         time.sleep(0.5)
 
-        if not (caption_box.get_attribute("textContent") or "").strip():
-            raise RuntimeError(
-                "caption box was still empty after pasting - the text paste didn't register"
-            )
+    if not (caption_box.get_attribute("textContent") or "").strip():
+        raise RuntimeError(
+            "caption box was still empty after pasting - the text paste didn't register"
+        )
 
-    # 5. Send.
     caption_box.send_keys(Keys.ENTER)
     time.sleep(3)  # image uploads can take longer than a plain text send
 
@@ -383,9 +384,18 @@ def run_worker(system_id):
     print(f"System {system_id} ready. Polling {config['api_base']} every 2s "
           f"with delay={config['message_delay_seconds']}s between sends...")
 
+    sent_count = 0
+
     try:
         while True:
             config = get_config()  # re-read so delay/template/image edits apply live
+
+            msg_limit = config.get("msg_limit")
+            if msg_limit is not None and sent_count >= msg_limit:
+                print(f"[system {system_id}] msg_limit ({msg_limit}) reached - stopping "
+                      f"so this number doesn't send too much and get blocked. Restart "
+                      f"this worker (or raise msg_limit in config.json) to keep sending.")
+                break
 
             try:
                 lead = fetch_next_lead(system_id, config)
@@ -417,7 +427,10 @@ def run_worker(system_id):
                 else:
                     send_text_message(driver, target_number, message, config["country_code"])
                 report_sent(lead["id"], config)
-                print(f"[system {system_id}] sent to {target_number} (lead #{lead['id']})")
+                sent_count += 1
+                limit_note = f"/{config.get('msg_limit')}" if config.get("msg_limit") is not None else ""
+                print(f"[system {system_id}] sent to {target_number} (lead #{lead['id']}) "
+                      f"[{sent_count}{limit_note} this run]")
             except Exception as exc:
                 report_failed(lead["id"], exc, config)
                 screenshot_path = _save_debug_screenshot(driver, system_id, lead["id"])
