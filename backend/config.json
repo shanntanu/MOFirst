@@ -1,6 +1,6 @@
 {
-  "api_base": "https://your-app.vercel.app",
-  "worker_api_key": "changeme-shared-secret",
+  "api_base": "https://mo-first-git-main-testertest.vercel.app",
+  "worker_api_key": "123456789",
   "message_delay_seconds": 5,
   "message_template": "Hi {first_name}, \n\nThanks for scanning our QR code! 🎉 \n\nJoin our FREE Stock Market Webinar Series and learn Trading and Investment insights from the industry experts.\n\n🗓️ *Weekly 21 live expert webinars.* \n💻 Click below to join on Zoom https://zoom.us/webinar/register/WN_g5mw9hDPRfe_SNbf_SktKw#/registration\n\nClick here to open demat account in a few minutes: https://ekyc.motilaloswal.com/open-demat-account",
   "message_image": "../public/message.png",
